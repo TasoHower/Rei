@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>loopForge Agent SSE Tester</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e4e6eb;
+      --text-dim: #8b8fa3;
+      --accent: #6c5ce7;
+      --accent-light: #a29bfe;
+      --success: #00b894;
+      --warning: #fdcb6e;
+      --error: #d63031;
+      --tool: #0984e3;
+      --user-bg: #6c5ce7;
+      --agent-bg: #1e2235;
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      background: linear-gradient(135deg, var(--accent), var(--accent-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    header .badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+
+    .container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 860px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 16px 20px;
+      gap: 12px;
+      overflow: hidden;
+    }
+
+    /* ── Config Panel ── */
+    .config-panel {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .config-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-dim);
+    }
+    .config-toggle:hover { color: var(--text); }
+    .config-toggle .arrow { transition: transform 0.2s; font-size: 12px; }
+    .config-panel.open .arrow { transform: rotate(180deg); }
+    .config-body { display: none; padding: 0 16px 16px; }
+    .config-panel.open .config-body { display: block; }
+    .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .config-grid .full-width { grid-column: 1 / -1; }
+    .field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-dim); margin-bottom: 4px; }
+    .field input, .field textarea {
+      width: 100%; padding: 8px 12px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--bg);
+      color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+    }
+    .field input:focus, .field textarea:focus { border-color: var(--accent); }
+    .field input::placeholder, .field textarea::placeholder { color: var(--text-dim); }
+    .field textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
+    .field .hint { font-size: 11px; color: var(--text-dim); margin-top: 3px; opacity: 0.7; }
+
+    /* ── Chat Area ── */
+    #chatArea {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 4px 12px 0;
+    }
+    #chatArea::-webkit-scrollbar { width: 5px; }
+    #chatArea::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── Bubble base ── */
+    .bubble-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      animation: fadeUp 0.2s ease-out;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .bubble-row.user { justify-content: flex-end; margin-top: 8px; }
+    .bubble-row.agent { justify-content: flex-start; }
+
+    .avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; flex-shrink: 0;
+    }
+    .bubble-row.user .avatar { background: var(--accent); color: #fff; }
+    .bubble-row.agent .avatar { background: #2d3250; color: var(--accent-light); }
+
+    .bubble {
+      max-width: 72%;
+      padding: 10px 14px;
+      font-size: 14px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bubble-row.user .bubble {
+      background: var(--user-bg);
+      color: #fff;
+      border-radius: var(--radius) var(--radius) 4px var(--radius);
+    }
+    .bubble-row.agent .bubble {
+      background: var(--agent-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius) var(--radius) var(--radius) 4px;
+    }
+    .bubble-row.agent .bubble.streaming::after {
+      content: '';
+      display: inline-block;
+      width: 2px;
+      height: 1em;
+      background: var(--accent-light);
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink 0.6s steps(2) infinite;
+    }
+    @keyframes blink {
+      0% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* ── System info (tool calls, llm events) ── */
+    .sys-info {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 7px 12px;
+      margin-left: 36px;
+      background: var(--surface);
+      border-left: 3px solid var(--border);
+      border-radius: 0 8px 8px 0;
+      animation: fadeUp 0.15s ease-out;
+    }
+    .sys-info + .sys-info {
+      margin-top: -4px;
+      border-top-right-radius: 0;
+    }
+    .sys-info:has(+ .sys-info) {
+      border-bottom-right-radius: 0;
+    }
+    .sys-info.sys-tool   { border-left-color: var(--tool); }
+    .sys-info.sys-result { border-left-color: var(--warning); }
+    .sys-info.sys-llm    { border-left-color: var(--accent-light); }
+    .sys-info.sys-transfer { border-left-color: var(--success); }
+    .sys-info.sys-err    { border-left-color: var(--error); }
+    .sys-info.sys-done   { border-left-color: var(--success); }
+
+    .sys-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      flex-shrink: 0;
+      line-height: 1.5;
+    }
+    .sys-tag.tool     { background: rgba(9,132,227,0.15); color: var(--tool); }
+    .sys-tag.result   { background: rgba(253,203,110,0.12); color: var(--warning); }
+    .sys-tag.llm      { background: rgba(108,92,231,0.12); color: var(--accent-light); }
+    .sys-tag.transfer { background: rgba(0,184,148,0.12); color: var(--success); }
+    .sys-tag.err      { background: rgba(214,48,49,0.15); color: var(--error); }
+    .sys-tag.done     { background: rgba(0,184,148,0.15); color: var(--success); }
+
+    .sys-detail {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    /* ── Consecutive agent flow ── */
+    .bubble-row.agent.continuation .avatar {
+      visibility: hidden;
+    }
+    .bubble-row.agent.continuation {
+      margin-top: -4px;
+    }
+    .sys-info.continuation {
+      margin-top: -4px;
+    }
+
+    /* ── Input ── */
+    .input-area {
+      display: flex;
+      gap: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #messageInput {
+      flex: 1;
+      padding: 12px 16px;
+      border-radius: 24px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+    }
+    #messageInput:focus { border-color: var(--accent); }
+    #messageInput::placeholder { color: var(--text-dim); }
+    #sendBtn {
+      padding: 12px 22px;
+      border-radius: 24px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    #sendBtn:hover { background: var(--accent-light); }
+    #sendBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-dim);
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>loopForge Agent Tester</h1>
+    <span class="badge">SSE Stream</span>
+  </header>
+
+  <div class="container">
+    <div class="config-panel open" id="configPanel">
+      <div class="config-toggle" onclick="toggleConfig()">
+        <span>Agent 配置</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="config-body">
+        <div class="config-grid">
+          <div class="field">
+            <label>API Key *</label>
+            <input id="cfgApiKey" type="password" placeholder="sk-... 或 ark-..." />
+            <div class="hint">DOUBAO_API_KEY / ARK_API_KEY</div>
+          </div>
+          <div class="field">
+            <label>Model</label>
+            <input id="cfgModel" type="text" placeholder="deepseek-v3-2-251201" />
+            <div class="hint">留空使用默认模型</div>
+          </div>
+          <div class="field full-width">
+            <label>Base URL</label>
+            <input id="cfgBaseURL" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3" />
+            <div class="hint">留空使用默认地址</div>
+          </div>
+          <div class="field full-width">
+            <label>System Prompt</label>
+            <textarea id="cfgSystemPrompt" placeholder="留空使用默认 system prompt (计算器助手)"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="chatArea">
+      <div class="empty-state" id="emptyState">配置 API Key 后输入消息开始对话</div>
+    </div>
+
+    <div class="input-area">
+      <input id="messageInput" type="text" placeholder="输入消息..."
+             value="请按以下步骤计算，每步必须调用对应的工具：1. 用 add 计算 17 + 28  2. 用 multiply 将结果乘以 3  3. 用 subtract 将结果减去 10" />
+      <button id="sendBtn" onclick="sendMessage()">发送</button>
+    </div>
+  </div>
+
+  <script>
+    const chatArea = document.getElementById('chatArea');
+    const emptyState = document.getElementById('emptyState');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    let currentAnswerBubble = null;
+    let lastSenderIsAgent = false;
+
+    const STORAGE_KEY = 'loopforge-config';
+    function loadSavedConfig() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        if (saved.api_key) document.getElementById('cfgApiKey').value = saved.api_key;
+        if (saved.model) document.getElementById('cfgModel').value = saved.model;
+        if (saved.base_url) document.getElementById('cfgBaseURL').value = saved.base_url;
+        if (saved.system_prompt) document.getElementById('cfgSystemPrompt').value = saved.system_prompt;
+      } catch {}
+    }
+    function saveConfig() { localStorage.setItem(STORAGE_KEY, JSON.stringify(getConfig())); }
+    function getConfig() {
+      return {
+        api_key: document.getElementById('cfgApiKey').value.trim(),
+        model: document.getElementById('cfgModel').value.trim(),
+        base_url: document.getElementById('cfgBaseURL').value.trim(),
+        system_prompt: document.getElementById('cfgSystemPrompt').value.trim(),
+      };
+    }
+    loadSavedConfig();
+
+    function toggleConfig() { document.getElementById('configPanel').classList.toggle('open'); }
+
+    messageInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+
+    function addUserBubble(text) {
+      const row = document.createElement('div');
+      row.className = 'bubble-row user';
+      row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div><div class="avatar">U</div>`;
+      chatArea.appendChild(row);
+      lastSenderIsAgent = false;
+      scroll();
+    }
+
+    function ensureAgentBubble() {
+      if (currentAnswerBubble) return;
+      const row = document.createElement('div');
+      row.className = 'bubble-row agent' + (lastSenderIsAgent ? ' continuation' : '');
+      row.innerHTML = `<div class="avatar">A</div><div class="bubble streaming"></div>`;
+      chatArea.appendChild(row);
+      currentAnswerBubble = row.querySelector('.bubble');
+      lastSenderIsAgent = true;
+      scroll();
+    }
+
+    function sealAgentBubble() {
+      if (currentAnswerBubble) {
+        currentAnswerBubble.classList.remove('streaming');
+        currentAnswerBubble = null;
+      }
+    }
+
+    const sysTypeMap = { tool: 'sys-tool', result: 'sys-result', llm: 'sys-llm', transfer: 'sys-transfer', err: 'sys-err', done: 'sys-done' };
+
+    function addSysInfo(tagCls, label, detail) {
+      sealAgentBubble();
+      const el = document.createElement('div');
+      const typeCls = sysTypeMap[tagCls] || 'sys-llm';
+      el.className = 'sys-info ' + typeCls + (lastSenderIsAgent ? ' continuation' : '');
+      el.innerHTML = `<span class="sys-tag ${tagCls}">${label}</span>${detail ? `<span class="sys-detail">${detail}</span>` : ''}`;
+      chatArea.appendChild(el);
+      lastSenderIsAgent = true;
+      scroll();
+    }
+
+    function scroll() { chatArea.scrollTop = chatArea.scrollHeight; }
+
+    function sendMessage() {
+      const message = messageInput.value.trim();
+      if (!message) return;
+      const cfg = getConfig();
+      if (!cfg.api_key) { alert('请先填写 API Key'); return; }
+      saveConfig();
+
+      emptyState?.remove();
+      sealAgentBubble();
+      addUserBubble(message);
+
+      sendBtn.disabled = true;
+      messageInput.value = '';
+
+      fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, ...cfg }),
+      }).then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        function pump() {
+          return reader.read().then(({ done, value }) => {
+            if (done) { sealAgentBubble(); sendBtn.disabled = false; return; }
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            processSSELines(lines);
+            return pump();
+          });
+        }
+        return pump();
+      }).catch(err => {
+        addSysInfo('err', 'ERROR', escapeHtml(err.message));
+        sendBtn.disabled = false;
+      });
+    }
+
+    function processSSELines(lines) {
+      let currentEvent = '', currentData = '';
+      for (const line of lines) {
+        if (line.startsWith('event:')) currentEvent = line.slice(6).trim();
+        else if (line.startsWith('data:')) currentData = line.slice(5).trim();
+        else if (line === '' && currentData) {
+          handleEvent(currentEvent, currentData);
+          currentEvent = ''; currentData = '';
+        }
+      }
+    }
+
+    function handleEvent(eventType, dataStr) {
+      let payload;
+      try { payload = JSON.parse(dataStr); } catch { payload = { data: dataStr }; }
+      const data = payload.data || {};
+
+      switch (eventType) {
+        case 'start':
+          break;
+
+        case 'question':
+          break;
+
+        case 'answer':
+          ensureAgentBubble();
+          currentAnswerBubble.textContent += (data.delta || '');
+          scroll();
+          break;
+
+        case 'call_llm_start':
+          sealAgentBubble();
+          addSysInfo('llm', 'LLM', escapeHtml(data.model || ''));
+          break;
+
+        case 'call_llm_end':
+          sealAgentBubble();
+          const fr = data.finish_reason || '';
+          addSysInfo('llm', fr === 'tool_calls' ? 'LLM → TOOLS' : 'LLM END',
+            `${data.input_tokens || 0} in / ${data.output_tokens || 0} out`);
+          break;
+
+        case 'tool_call_start':
+          sealAgentBubble();
+          addSysInfo('tool', data.name || 'tool', escapeHtml(data.arguments || ''));
+          break;
+
+        case 'tool_call_end':
+          addSysInfo('result',
+            data.is_error ? 'FAIL' : 'OK',
+            escapeHtml(data.output || ''));
+          break;
+
+        case 'agent_transfer':
+          sealAgentBubble();
+          addSysInfo('transfer', 'TRANSFER', `${data.phase || ''} ${data.child_run_id || ''}`);
+          break;
+
+        case 'error':
+          sealAgentBubble();
+          addSysInfo('err', 'ERROR', `[${escapeHtml(data.code || '')}] ${escapeHtml(data.message || '')}`);
+          break;
+
+        case 'query_end': {
+          sealAgentBubble();
+          const oc = data.outcome || data || {};
+          const m = oc.Metrics || oc.metrics || {};
+          const inTok = m.input_tokens || m.InputTokens || 0;
+          const outTok = m.output_tokens || m.OutputTokens || 0;
+          const totalTok = m.total_tokens || m.TotalTokens || (inTok + outTok);
+          let detail = `${oc.Termination || oc.termination || ''} · ${m.model || m.Model || ''} · ${m.steps || m.Steps || 0} steps`;
+          if (totalTok > 0) {
+            detail += ` · tokens: ${inTok} in / ${outTok} out / ${totalTok} total`;
+          }
+          addSysInfo('done', 'DONE', detail);
+          break;
+        }
+
+        default:
+          addSysInfo('llm', eventType, escapeHtml(dataStr).slice(0, 120));
+      }
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>

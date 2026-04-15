@@ -1,0 +1,9 @@
+# Build binaries (root level only)
+/agentdemo
+/loopforged
+
+# Secrets
+start.sh
+
+# Editor
+.cursor/
