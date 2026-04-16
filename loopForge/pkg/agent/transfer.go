@@ -56,10 +56,37 @@ func BuildTransferPrompt(current *Agent) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("\n\n## Multi-Agent Transfer\n")
-	b.WriteString("You are part of a multi-agent system. ")
-	b.WriteString("When the user's request is better handled by another agent, ")
-	b.WriteString("call the corresponding transfer tool with a reason.\n\n")
+	b.WriteString("\n\n## Multi-Agent Delegation Protocol\n")
+	b.WriteString("You operate within a multi-agent system composed of specialized agents. ")
+	b.WriteString("Your responsibility is to solve requests directly when possible, ")
+	b.WriteString("and delegate tasks when another agent is better suited.\n\n")
+
+	b.WriteString("### When to Transfer\n")
+	b.WriteString("Use a transfer tool when ANY of the following applies:\n")
+	b.WriteString("- Another agent has clearer domain expertise for the request.\n")
+	b.WriteString("- The task requires capabilities, tools, or permissions you do not have.\n")
+	b.WriteString("- The request can be parallelized into independent subtasks.\n")
+	b.WriteString("- Specialized handling would improve speed, quality, or reliability.\n")
+	b.WriteString("- You are uncertain and another agent is explicitly designed for this area.\n\n")
+
+	b.WriteString("### When NOT to Transfer\n")
+	b.WriteString("Do NOT transfer when:\n")
+	b.WriteString("- You can complete the task accurately yourself.\n")
+	b.WriteString("- Transfer adds unnecessary latency or complexity.\n")
+	b.WriteString("- The request is trivial, conversational, or requires continuity best handled here.\n\n")
+
+	b.WriteString("### Transfer Rules\n")
+	b.WriteString("- Choose the single best agent first unless multi-agent execution is clearly beneficial.\n")
+	b.WriteString("- Provide a concise reason describing the goal, context, and expected output.\n")
+	b.WriteString("- Preserve important user constraints, preferences, and prior context.\n")
+	b.WriteString("- Do not expose internal routing logic to the user.\n")
+	b.WriteString("- If no agent is suitable, continue handling the request yourself.\n\n")
+
+	b.WriteString("### After Transfer\n")
+	b.WriteString("- Integrate the returned result into a coherent final answer.\n")
+	b.WriteString("- Validate outputs before presenting them.\n")
+	b.WriteString("- If needed, perform follow-up transfers iteratively.\n\n")
+
 	b.WriteString("Available agents:\n")
 	for _, t := range targets {
 		desc := t.Description

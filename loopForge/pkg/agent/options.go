@@ -94,3 +94,11 @@ func WithToolInterceptor(fn ToolInterceptor) Option {
 		a.ToolInterceptor = fn
 	}
 }
+
+// WithVariable enables var_set and injects visitable variables into the system
+// prompt as a [Variables] block before each model call.
+func WithVariable() Option {
+	return func(a *Agent) {
+		a.Variable = true
+	}
+}

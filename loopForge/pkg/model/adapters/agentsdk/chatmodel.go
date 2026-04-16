@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	lferrors "loopforge/pkg/errors"
 	lpmodel "loopforge/pkg/model"
 
 	sdkmodel "github.com/agentizen/agent-sdk-go/pkg/model"
@@ -116,8 +117,8 @@ func (c *SDKChatModel) Stream(ctx context.Context, input []*lpmodel.Message, opt
 			}
 			out <- streamPart{msg: finalMsg}
 		} else if !hadDelta {
-			out <- streamPart{err: fmt.Errorf("stream ended without content or final response")}
-		}
+				out <- streamPart{err: fmt.Errorf("%w", lferrors.ErrStreamEmpty)}
+			}
 	}()
 
 	return newChanStreamReader(out), nil

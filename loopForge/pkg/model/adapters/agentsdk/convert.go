@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	lferrors "loopforge/pkg/errors"
 	lpmodel "loopforge/pkg/model"
 
 	sdkmodel "github.com/agentizen/agent-sdk-go/pkg/model"
@@ -86,7 +87,7 @@ func messagesToInputList(msgs []*lpmodel.Message) ([]interface{}, error) {
 		case lpmodel.RoleTool:
 			out = append(out, toolResultMap(m))
 		default:
-			return nil, fmt.Errorf("unsupported message role %q", m.Role)
+			return nil, fmt.Errorf("%w: %q", lferrors.ErrUnsupportedRole, m.Role)
 		}
 	}
 	return out, nil

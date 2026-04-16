@@ -441,7 +441,7 @@
           </div>
           <div class="field full-width" id="systemPromptField">
             <label>System Prompt <span style="font-weight:400;color:var(--text-dim)">(仅 Single 模式)</span></label>
-            <textarea id="cfgSystemPrompt" placeholder="留空使用默认 system prompt (计算器助手)"></textarea>
+            <textarea id="cfgSystemPrompt" placeholder="留空使用默认：参数赋值测试（仅 var_set，无计算器）"></textarea>
           </div>
         </div>
       </div>
@@ -452,8 +452,8 @@
     </div>
 
     <div class="input-area">
-      <input id="messageInput" type="text" placeholder="输入消息..."
-             value="请按以下步骤计算，每步必须调用对应的工具：1. 用 add 计算 17 + 28  2. 用 multiply 将结果乘以 3  3. 用 subtract 将结果减去 10" />
+      <input id="messageInput" type="text" placeholder="输入要测试的赋值指令…"
+             value="【参数赋值】请看 [Variables]。请用 var_set 写入：session_note=&quot;单 Agent 第一轮&quot;，user_goal=&quot;验证 var_set 与参数池&quot;。写完后一句话确认。" />
       <button id="sendBtn" onclick="sendMessage()">发送</button>
     </div>
   </div>
@@ -470,8 +470,8 @@
     let currentMode = 'single';
 
     const defaultMessages = {
-      single: '请按以下步骤计算，每步必须调用对应的工具：1. 用 add 计算 17 + 28  2. 用 multiply 将结果乘以 3  3. 用 subtract 将结果减去 10',
-      transfer: '帮我算一下 (15 + 27) * 3 - 10 的结果，每步都要用工具计算。'
+      single: '【参数赋值】请看 [Variables]。请用 var_set 写入：session_note="单 Agent 第一轮"，user_goal="验证 var_set 与参数池"。写完后一句话确认。',
+      transfer: '【参数赋值】请转给 writer：用 var_set 写入 session_note="Transfer 由 writer 写入"，user_goal="多 Agent 下参数池"。然后一句话确认。'
     };
 
     const STORAGE_KEY = 'loopforge-config';
@@ -694,6 +694,12 @@
         case 'query_end': {
           sealAgentBubble();
           const oc = data.outcome || data || {};
+          if (data.variables && data.variables.vars) {
+            const lines = data.variables.vars.map((v) =>
+              `${v.key}: ${v.value === null || v.value === undefined ? '<unset>' : JSON.stringify(v.value)}`
+            ).join(' · ');
+            addSysInfo('vars', 'VARIABLES', escapeHtml(lines).slice(0, 800));
+          }
           const m = oc.Metrics || oc.metrics || {};
           const inTok = m.input_tokens || m.InputTokens || 0;
           const outTok = m.output_tokens || m.OutputTokens || 0;

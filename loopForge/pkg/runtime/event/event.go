@@ -17,6 +17,7 @@ const (
 	EventCallRAGStart  EventMessageType = "call_rag_start"
 	EventCallRAGEnd    EventMessageType = "call_rag_end"
 	EventAgentTransfer EventMessageType = "agent_transfer"
+	EventVarChange     EventMessageType = "var_change"
 	EventQueryEnd      EventMessageType = "query_end"
 	EventWelcome       EventMessageType = "welcome"
 	EventError         EventMessageType = "error"
@@ -48,7 +49,8 @@ func (e *RuntimeEvent) CallLLMEnd() *CallLLMEndPayload    { p, _ := e.Payload.(*
 func (e *RuntimeEvent) CallRAGStart() *CallRAGStartPayload { p, _ := e.Payload.(*CallRAGStartPayload); return p }
 func (e *RuntimeEvent) CallRAGEnd() *CallRAGEndPayload    { p, _ := e.Payload.(*CallRAGEndPayload); return p }
 func (e *RuntimeEvent) AgentTransfer() *AgentTransferPayload { p, _ := e.Payload.(*AgentTransferPayload); return p }
-func (e *RuntimeEvent) QueryEnd() *QueryEndPayload        { p, _ := e.Payload.(*QueryEndPayload); return p }
+func (e *RuntimeEvent) VarChange() *VarChangePayload         { p, _ := e.Payload.(*VarChangePayload); return p }
+func (e *RuntimeEvent) QueryEnd() *QueryEndPayload           { p, _ := e.Payload.(*QueryEndPayload); return p }
 func (e *RuntimeEvent) Welcome() *WelcomePayload          { p, _ := e.Payload.(*WelcomePayload); return p }
 func (e *RuntimeEvent) Error() *ErrorPayload              { p, _ := e.Payload.(*ErrorPayload); return p }
 
@@ -142,6 +144,18 @@ type AgentTransferPayload struct {
 }
 
 func (*AgentTransferPayload) eventPayload() EventMessageType { return EventAgentTransfer }
+
+// VarChangePayload is emitted whenever a shared variable is written or deleted.
+type VarChangePayload struct {
+	// Operation is "set" when a value is assigned, "delete" when the key is removed.
+	Operation string `json:"operation"`
+	Key       string `json:"key"`
+	Value     any    `json:"value,omitempty"`
+	// Agent is the name of the agent that triggered the change (empty when system-initiated).
+	Agent string `json:"agent,omitempty"`
+}
+
+func (*VarChangePayload) eventPayload() EventMessageType { return EventVarChange }
 
 type QueryEndPayload struct {
 	Outcome *outcome.RuntimeOutcome `json:"outcome"`

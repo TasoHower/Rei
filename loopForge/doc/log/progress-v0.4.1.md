@@ -270,7 +270,15 @@ test-server
 
 ## 下一步计划
 
-### v0.5.0 — Agent 运行时增强
+### v0.5.0 — Versable（Agent 间自定义共享变量）
+
+| 优先级 | 方向 | 说明 |
+|--------|------|------|
+| **P0** | **Versable** | `pkg/versable` 独立包，VarStore 线程安全变量存储，context 注入，泛型 `Get[T]`。Agent 通过 `WithVersable()` 开启内置 var_set/var_get/var_list 工具，Tool handler 通过 `versable.FromContext(ctx)` 读写。Transfer 链自动传递 Store |
+
+> 详见 [progress-v0.5.0.md](progress-v0.5.0.md)
+
+### v0.5.1+ — 后续方向
 
 | 优先级 | 方向 | 说明 |
 |--------|------|------|

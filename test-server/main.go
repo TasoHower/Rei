@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -23,18 +24,22 @@ import (
 	"loopforge/pkg/runner"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/variable"
 )
 
 const (
 	defaultBaseURL      = "https://ark.cn-beijing.volces.com/api/v3"
 	defaultModel        = "deepseek-v3-2-251201"
-	defaultSystemPrompt = `You are a calculator assistant. You have four arithmetic tools:
-  add(a, b)       → a + b
-  subtract(a, b)  → a - b
-  multiply(a, b)  → a * b
-  divide(a, b)    → a / b
-You MUST call the tools for every calculation step. Never compute in your head.
-When multiple steps depend on previous results, call them one step at a time and use the returned value for the next call.`
+	defaultSystemPrompt = `你是「参数赋值」测试助手（单 Agent 模式）。
+
+你的唯一可调工具是 var_set：用于给共享变量赋值。系统提示末尾的 [Variables] 块列出当前会话变量：
+- 以 const_ 开头的键为只读，禁止对它们调用 var_set。
+- 显示为 <unset> 的键需要你在理解用户意图后填入合理值。
+
+规则：
+1. 用户要求赋值时，必须实际调用 var_set（每个键一次或合并逻辑由你决定，但要能在工具调用中看到）。
+2. 赋值用简洁中文或用户指定语言即可；不要编造与用户明显无关的长文。
+3. 完成后用一两句话向用户确认已写入的键与含义。`
 )
 
 // ChatRequest is the JSON body for POST /api/chat.
@@ -81,6 +86,57 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// --- session-scoped variables (in-memory; demonstrates Materialize + Snapshot) ---
+
+var (
+	varSnapMu sync.Mutex
+	varSnaps  = make(map[string][]byte) // session_id -> JSON StoreSnapshot
+)
+
+func testServerVariableManifest() *variable.Manifest {
+	return &variable.Manifest{Specs: []variable.Spec{
+		{Key: "const_session_id", Description: "当前会话 ID（只读）"},
+		{Key: "const_chat_mode", Description: "聊天模式 single / transfer（只读）"},
+		{Key: "session_note", Description: "会话备注（var_set 可写，多轮保留）"},
+		{Key: "user_goal", Description: "用户本回合目标（简短概括）"},
+	}}
+}
+
+func materializeVarStore(sessionID, chatMode string) *variable.VarStore {
+	var persisted *variable.StoreSnapshot
+	varSnapMu.Lock()
+	raw := varSnaps[sessionID]
+	varSnapMu.Unlock()
+	if len(raw) > 0 {
+		var snap variable.StoreSnapshot
+		if json.Unmarshal(raw, &snap) == nil {
+			persisted = &snap
+		}
+	}
+	return variable.Materialize(
+		testServerVariableManifest(),
+		persisted,
+		map[string]any{
+			"const_session_id": sessionID,
+			"const_chat_mode":  chatMode,
+		},
+	)
+}
+
+func persistVarSnapshot(sessionID string, store *variable.VarStore) {
+	if store == nil {
+		return
+	}
+	raw, err := json.Marshal(store.Snapshot())
+	if err != nil {
+		return
+	}
+	varSnapMu.Lock()
+	varSnaps[sessionID] = raw
+	varSnapMu.Unlock()
+	slog.Default().Debug("variable snapshot persisted", "session_id", sessionID, "bytes", len(raw))
 }
 
 func parseBinaryArgs(raw string) (a, b float64, err error) {
@@ -153,62 +209,64 @@ func mathToolInfos() []*model.ToolInfo {
 
 // --- agent builders ---
 
-func buildSingleAgent(req *ChatRequest) agent.Runnable {
+func buildSingleAgent(req *ChatRequest) *agent.Agent {
 	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
 	return agent.New(chat,
 		agent.WithName("test-server-agent"),
 		agent.WithModelName(req.Model),
 		agent.WithMaxSteps(12),
-		agent.WithToolInfos(mathToolInfos()),
 		agent.WithSystemInstructions(req.SystemPrompt),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
+		agent.WithVariable(),
 	)
 }
 
-func buildTransferAgent(req *ChatRequest) agent.Runnable {
+// buildTransferEntry returns the entry agent (triage); use runner.NewRunner(entry, ...) with WithVarStore.
+func buildTransferEntry(req *ChatRequest) *agent.Agent {
 	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
 
 	triage := agent.New(chat,
 		agent.WithName("triage"),
 		agent.WithDescription("Analyzes the user's request and routes to the appropriate specialist."),
 		agent.WithModelName(req.Model),
-		agent.WithMaxSteps(4),
-		agent.WithSystemInstructions(`You are a triage agent. Analyze the user's request and transfer to the right specialist:
-- For math/calculation tasks → transfer to "math_expert"
-- For writing/creative/other tasks → transfer to "writer"
-Do NOT attempt to answer yourself. Always transfer to a specialist.`),
+		agent.WithMaxSteps(20),
+		agent.WithSystemInstructions(`You are a triage agent. Route to one specialist (do not answer the user yourself):
+- Math / arithmetic / 计算 → transfer to "math_expert"
+- Writing / creative / 创作 → transfer to "writer"
+- Session variables / var_set / 参数赋值 / [Variables] / 写入变量 → transfer to "writer" (writer handles var_set + reply)
+Always call transfer to a specialist.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
+		agent.WithVariable(),
 	)
 
 	mathExpert := agent.New(chat,
 		agent.WithName("math_expert"),
 		agent.WithDescription("Solves math problems step by step using arithmetic tools (add, subtract, multiply, divide)."),
 		agent.WithModelName(req.Model),
-		agent.WithMaxSteps(12),
+		agent.WithMaxSteps(20),
 		agent.WithToolInfos(mathToolInfos()),
 		agent.WithSystemInstructions(`You are a math expert. You have four arithmetic tools: add, subtract, multiply, divide.
 You MUST call tools for every calculation step. Never compute in your head.
-When multiple steps depend on previous results, call them one step at a time.`),
+When multiple steps depend on previous results, call them one step at a time.
+Optional: var_set session_note when the user wants a preference remembered.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
+		agent.WithVariable(),
 	)
 
 	writer := agent.New(chat,
 		agent.WithName("writer"),
 		agent.WithDescription("Creates creative text, stories, poems, and other written content."),
 		agent.WithModelName(req.Model),
-		agent.WithMaxSteps(6),
-		agent.WithSystemInstructions(`You are a creative writer. Produce engaging, well-structured text based on the user's request.
-Be creative and thoughtful in your writing.`),
+		agent.WithMaxSteps(20),
+		agent.WithSystemInstructions(`You are a creative writer. When the user asks for 参数赋值 / var_set / [Variables], use var_set to fill session_note and user_goal as requested, then reply briefly. For normal creative requests, write as usual; you may still use var_set if the user wants session fields updated.`),
 		agent.WithCallOptions(model.WithTemperature(0.7)),
+		agent.WithVariable(),
 	)
 
 	triage.AddHandoff(mathExpert, writer)
 	mathExpert.AddHandoff(triage)
 
-	return runner.NewRunner(triage,
-		runner.WithMaxTransfers(5),
-		runner.WithLogger(log.Default()),
-	)
+	return triage
 }
 
 // --- handler ---
@@ -238,17 +296,26 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 			"session_id", chatReq.SessionID,
 		)
 
-		var ag agent.Runnable
-		switch chatReq.Mode {
-		case "transfer":
-			ag = buildTransferAgent(&chatReq)
-		default:
-			ag = buildSingleAgent(&chatReq)
-		}
-
 		sessionID := chatReq.SessionID
 		if sessionID == "" {
 			sessionID = "sse-session"
+		}
+
+		vstore := materializeVarStore(sessionID, chatReq.Mode)
+
+		var ag agent.Runnable
+		switch chatReq.Mode {
+		case "transfer":
+			ag = runner.NewRunner(buildTransferEntry(&chatReq),
+				runner.WithMaxTransfers(10),
+				runner.WithLogger(log.Default()),
+				runner.WithVarStore(vstore),
+			)
+		default:
+			ag = runner.NewRunner(buildSingleAgent(&chatReq),
+				runner.WithLogger(log.Default()),
+				runner.WithVarStore(vstore),
+			)
 		}
 
 		req := &request.RuntimeRequest{
@@ -261,7 +328,11 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 		ch := ag.Run(ctx, req)
 
 		eventID := 0
+		var lastVarStore *variable.VarStore
 		for ev := range ch {
+			if qe := ev.QueryEnd(); qe != nil && qe.Outcome != nil {
+				lastVarStore = qe.Outcome.VarStore
+			}
 			eventID++
 			sseEvt := runtimeEventToSSE(ev)
 			data, _ := json.Marshal(sseEvt)
@@ -272,6 +343,8 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 			)
 		}
 		w.Close()
+
+		persistVarSnapshot(sessionID, lastVarStore)
 
 		logger.Info("chat request completed",
 			"session_id", sessionID,
@@ -322,7 +395,14 @@ func runtimeEventToSSE(ev *event.RuntimeEvent) SSEEvent {
 		}
 	case event.EventQueryEnd:
 		if p := ev.QueryEnd(); p != nil {
-			out.Data = p
+			if p.Outcome != nil && p.Outcome.VarStore != nil {
+				out.Data = map[string]any{
+					"outcome":   p.Outcome,
+					"variables": p.Outcome.VarStore.Snapshot(),
+				}
+			} else {
+				out.Data = p
+			}
 		}
 	}
 	return out

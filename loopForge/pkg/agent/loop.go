@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 
+	"loopforge/pkg/log"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/variable"
 )
 
 // RunLoop executes the tool-calling loop.
@@ -27,6 +29,7 @@ func (a *Agent) RunLoop(
 	state *LoopState,
 ) *InterceptedCall {
 	runID := runIDFrom(req)
+	var vstore *variable.VarStore
 
 	emit := func(step int, payload event.EventPayload) {
 		select {
@@ -41,10 +44,14 @@ func (a *Agent) RunLoop(
 
 	emitError := func(code, msg string) {
 		emit(0, &event.ErrorPayload{Code: code, Message: msg})
-		emitQueryEnd(&outcome.RuntimeOutcome{
+		oc := &outcome.RuntimeOutcome{
 			RunID:       runID,
 			Termination: outcome.TerminationError,
-		})
+		}
+		if vstore != nil {
+			oc.VarStore = vstore
+		}
+		emitQueryEnd(oc)
 	}
 
 	// --- validation ---
@@ -58,11 +65,26 @@ func (a *Agent) RunLoop(
 		return nil
 	}
 
+	// --- variable store ---
+
+	if state != nil && state.VarStore != nil {
+		vstore = state.VarStore
+	} else {
+		vstore = variable.New()
+	}
+	ctx = variable.NewContext(ctx, vstore)
+	baseSystem := a.SystemInstructions
+
+	var varTools []*model.ToolInfo
+	if a.Variable {
+		varTools = []*model.ToolInfo{variable.VarSetTool(vstore)}
+	}
+
 	// --- prepare tools and model ---
 
-	m, setupErr := a.bindModel()
+	m, setupErr := a.bindModel(varTools...)
 	if setupErr != nil {
-		emitError(setupErr.code, setupErr.msg)
+		emitError(setupErr.Code, setupErr.Msg)
 		return nil
 	}
 
@@ -100,6 +122,7 @@ func (a *Agent) RunLoop(
 			FinalText:   finalText,
 			Termination: termination,
 			Metrics:     buildMetrics(steps),
+			VarStore:    vstore,
 		}
 		if state != nil {
 			oc.TransferChain = append(state.TransferChain, a.Name)
@@ -118,6 +141,26 @@ func (a *Agent) RunLoop(
 
 	var lastText string
 	for step := range maxSteps {
+		fullSystem := baseSystem
+		if a.Variable {
+			block := vstore.PromptBlock()
+			if block != "" {
+				if fullSystem != "" {
+					fullSystem = fullSystem + "\n\n" + block
+				} else {
+					fullSystem = block
+				}
+			}
+			log.Default().Debug("variables prompt block",
+				"agent", a.Name,
+				"run_id", runID,
+				"step", step,
+				"block_len", len(block),
+				"var_count", vstore.Len(),
+			)
+		}
+		msgs = replaceSystemMessage(msgs, fullSystem)
+
 		emit(step, &event.CallLLMStartPayload{
 			Model:       modelName,
 			Temperature: callCfg.Temperature,
@@ -168,7 +211,7 @@ func (a *Agent) RunLoop(
 			for i := range sr.ToolCalls {
 				tc := sr.ToolCalls[i]
 				if a.ToolInterceptor(tc) {
-					return &InterceptedCall{
+					ic := &InterceptedCall{
 						ToolCall: tc,
 						Msgs:     msgs,
 						Metrics: outcome.RunMetrics{
@@ -179,12 +222,17 @@ func (a *Agent) RunLoop(
 							Steps:        step + 1,
 						},
 					}
+					if vstore != nil {
+						ic.VarSnapshot = vstore.Snapshot()
+					}
+					return ic
 				}
 			}
 		}
 
-		// Execute regular tool calls.
-		toolMsgs, toolErr := executeToolCalls(ctx, a.ToolInfos, a.Executor, sr.ToolCalls, emit, step)
+		// Execute regular tool calls (use merged list so ExtraTools + var_set resolve).
+		invokeInfos := a.mergedToolInfos(varTools...)
+		toolMsgs, toolErr := executeToolCalls(ctx, invokeInfos, a.Executor, sr.ToolCalls, emit, step)
 		if toolErr != nil {
 			emitError("tool_exec", toolErr.Error())
 			return nil

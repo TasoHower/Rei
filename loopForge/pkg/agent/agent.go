@@ -8,6 +8,7 @@ import (
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 	"loopforge/pkg/tool"
+	"loopforge/pkg/variable"
 )
 
 // ToolInterceptor, when set on an Agent, is called before executing each
@@ -19,9 +20,10 @@ type ToolInterceptor func(tc model.ToolCallPart) bool
 // tool call. It carries the intercepted call, the conversation so far, and
 // accumulated metrics for the current agent's portion of the run.
 type InterceptedCall struct {
-	ToolCall model.ToolCallPart
-	Msgs     []*model.Message
-	Metrics  outcome.RunMetrics
+	ToolCall    model.ToolCallPart
+	Msgs        []*model.Message
+	Metrics     outcome.RunMetrics
+	VarSnapshot *variable.StoreSnapshot // optional: store state at transfer intercept
 }
 
 // LoopState carries accumulated context from previous agents in an orchestrated
@@ -30,6 +32,8 @@ type LoopState struct {
 	AccumulatedMetrics outcome.RunMetrics
 	TransferChain      []string
 	SuppressBookends   bool // skip Start/Question (already emitted by first agent)
+	// VarStore is shared across transfer hops when set by the Runner.
+	VarStore *variable.VarStore
 }
 
 // Agent is a concrete Runnable that drives a tool-calling loop using pkg/model.
@@ -66,6 +70,9 @@ type Agent struct {
 	// of invoking the tool.
 	ToolInterceptor ToolInterceptor
 
+	// Variable enables var_set and [Variables] prompt injection for this agent.
+	Variable bool
+
 	handoffs []*Agent
 }
 
@@ -101,6 +108,7 @@ func (a *Agent) Clone() *Agent {
 		c.handoffs = make([]*Agent, len(a.handoffs))
 		copy(c.handoffs, a.handoffs)
 	}
+	c.Variable = a.Variable
 	return &c
 }
 
@@ -109,7 +117,7 @@ var _ Runnable = (*Agent)(nil)
 // Run starts the agent loop in a goroutine and returns a channel that streams
 // RuntimeEvents. The channel is closed when the run finishes.
 func (a *Agent) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *event.RuntimeEvent {
-	ch := make(chan *event.RuntimeEvent, 8)
+	ch := make(chan *event.RuntimeEvent, 128)
 
 	go func() {
 		defer close(ch)

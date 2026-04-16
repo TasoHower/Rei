@@ -3,44 +3,50 @@ package agent
 import (
 	"strings"
 
+	lferrors "loopforge/pkg/errors"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/request"
 	"loopforge/pkg/tool"
 )
 
-// loopSetupError is a structured error from the pre-loop setup phase.
-type loopSetupError struct {
-	code string
-	msg  string
+// mergedToolInfos returns ToolInfos + ExtraTools + extraRuntime in the same
+// order as bindModel uses for WithTools. Use this list when resolving tool
+// execution (tool.Invoke) so names registered only on ExtraTools/runtime
+// extras (e.g. var_set) still match.
+func (a *Agent) mergedToolInfos(extraRuntime ...*model.ToolInfo) []*model.ToolInfo {
+	nExtra := len(a.ExtraTools) + len(extraRuntime)
+	if nExtra == 0 {
+		return a.ToolInfos
+	}
+	merged := make([]*model.ToolInfo, 0, len(a.ToolInfos)+nExtra)
+	merged = append(merged, a.ToolInfos...)
+	merged = append(merged, a.ExtraTools...)
+	merged = append(merged, extraRuntime...)
+	return merged
 }
 
-// bindModel merges ExtraTools with ToolInfos, validates bindings, and returns
-// a tool-bound model ready for streaming.
-func (a *Agent) bindModel() (model.ToolCallingChatModel, *loopSetupError) {
-	allTools := a.ToolInfos
-	if len(a.ExtraTools) > 0 {
-		merged := make([]*model.ToolInfo, 0, len(a.ToolInfos)+len(a.ExtraTools))
-		merged = append(merged, a.ToolInfos...)
-		merged = append(merged, a.ExtraTools...)
-		allTools = merged
-	}
+// bindModel merges ExtraTools and optional extraRuntimeTools with ToolInfos,
+// validates bindings, and returns a tool-bound model ready for streaming.
+func (a *Agent) bindModel(extraRuntimeTools ...*model.ToolInfo) (model.ToolCallingChatModel, *lferrors.SetupError) {
+	allTools := a.mergedToolInfos(extraRuntimeTools...)
 
 	// Validate only the agent's own tools (ExtraTools have no Handle by design).
 	if len(a.ToolInfos) > 0 {
 		if err := tool.ValidateBindings(a.ToolInfos, a.Executor); err != nil {
-			return nil, &loopSetupError{"invalid_config", err.Error()}
+			return nil, lferrors.NewSetupError("invalid_config", err.Error())
 		}
 	}
 
 	if len(allTools) > 0 {
 		m, err := a.ChatModel.WithTools(allTools)
 		if err != nil {
-			return nil, &loopSetupError{"tool_bind", err.Error()}
+			return nil, lferrors.NewSetupError("tool_bind", err.Error())
 		}
 		return m, nil
 	}
 	return a.ChatModel, nil
 }
+
 
 // resolveMaxSteps determines the effective max loop iterations from the
 // agent default, falling back to 16, with per-request override.

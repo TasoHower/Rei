@@ -10,6 +10,7 @@ import (
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/variable"
 )
 
 const defaultMaxTransfers = 10
@@ -24,6 +25,7 @@ type Runner struct {
 	entryAgent   *agent.Agent
 	maxTransfers int
 	logger       log.Logger
+	varStore     *variable.VarStore
 }
 
 var _ agent.Runnable = (*Runner)(nil)
@@ -67,11 +69,23 @@ func WithMaxTransfers(n int) RunOption {
 	}
 }
 
+// WithVarStore sets the shared variable store for the run (transfer-safe).
+// If nil is passed, the option is ignored and a new store is created per run.
+func WithVarStore(s *variable.VarStore) RunOption {
+	return func(r *Runner) {
+		if s != nil {
+			r.varStore = s
+		}
+	}
+}
+
 // Run starts the agent graph in a goroutine and returns a channel that streams
 // RuntimeEvents. If the entry agent has handoff targets, the runner
 // automatically manages the transfer loop; otherwise it runs the single agent.
 func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *event.RuntimeEvent {
-	ch := make(chan *event.RuntimeEvent, 8)
+	// Buffered enough that slow SSE clients do not deadlock the agent on emit
+	// (select only drains on ctx.Done otherwise).
+	ch := make(chan *event.RuntimeEvent, 128)
 
 	go func() {
 		defer close(ch)
@@ -85,7 +99,12 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 			r.logger.Debug("run started in single-agent mode",
 				"agent", r.entryAgent.Name,
 			)
-			r.entryAgent.RunLoop(ctx, req, ch, nil, nil)
+			store := r.varStore
+			if store == nil {
+				store = variable.New()
+			}
+			st := &agent.LoopState{VarStore: store}
+			r.entryAgent.RunLoop(ctx, req, ch, nil, st)
 		}
 	}()
 
@@ -102,12 +121,18 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 		}
 	}
 
+	var runStore *variable.VarStore
+
 	emitError := func(code, msg string) {
 		emit(0, &event.ErrorPayload{Code: code, Message: msg})
-		emit(0, &event.QueryEndPayload{Outcome: &outcome.RuntimeOutcome{
+		oc := &outcome.RuntimeOutcome{
 			RunID:       runID,
 			Termination: outcome.TerminationError,
-		}})
+		}
+		if runStore != nil {
+			oc.VarStore = runStore
+		}
+		emit(0, &event.QueryEndPayload{Outcome: oc})
 	}
 
 	if r.entryAgent == nil {
@@ -121,6 +146,11 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 		"entry_agent", r.entryAgent.Name,
 		"max_transfers", r.maxTransfers,
 	)
+
+	runStore = r.varStore
+	if runStore == nil {
+		runStore = variable.New()
+	}
 
 	current := r.entryAgent
 	var inheritedMsgs []*model.Message
@@ -141,6 +171,7 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 			AccumulatedMetrics: accumulated,
 			TransferChain:      transferChain,
 			SuppressBookends:   !firstAgent,
+			VarStore:           runStore,
 		}
 
 		r.logger.Debug("agent executing",

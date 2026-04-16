@@ -1,5 +1,7 @@
 package outcome
 
+import "loopforge/pkg/variable"
+
 // RuntimeOutcome is the synchronous or end-of-stream summary for a run.
 type RuntimeOutcome struct {
 	RunID         string
@@ -8,6 +10,8 @@ type RuntimeOutcome struct {
 	Metrics       RunMetrics
 	ChildRunIDs   []string
 	TransferChain []string // ordered agent names visited during transfer handoffs
+	// VarStore is the variable state at end of run (nil if variables unused).
+	VarStore *variable.VarStore `json:"-"`
 }
 
 // TerminationReason explains why the run stopped.
