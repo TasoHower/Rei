@@ -19,7 +19,7 @@ import (
 //
 // Returns an *InterceptedCall if a ToolInterceptor matched, or nil for
 // normal completion / error.
-func (a *RunnerAgent) RunLoop(
+func (a *Agent) RunLoop(
 	ctx context.Context,
 	req *request.RuntimeRequest,
 	ch chan<- *event.RuntimeEvent,
@@ -54,7 +54,7 @@ func (a *RunnerAgent) RunLoop(
 		return nil
 	}
 	if a.ChatModel == nil {
-		emitError("invalid_config", "RunnerAgent.ChatModel is nil")
+		emitError("invalid_config", "Agent.ChatModel is nil")
 		return nil
 	}
 
@@ -117,7 +117,7 @@ func (a *RunnerAgent) RunLoop(
 	// --- main loop ---
 
 	var lastText string
-	for step := 0; step < maxSteps; step++ {
+	for step := range maxSteps {
 		emit(step, &event.CallLLMStartPayload{
 			Model:       modelName,
 			Temperature: callCfg.Temperature,

@@ -53,7 +53,7 @@ func (mockToolLoopChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCallin
 
 var _ modeliface.ToolCallingChatModel = mockToolLoopChatModel{}
 
-func TestRunnerAgent_toolLoop_invokesHandle(t *testing.T) {
+func TestAgent_toolLoop_invokesHandle(t *testing.T) {
 	ctx := context.Background()
 	var invoked bool
 	infos := []*model.ToolInfo{
@@ -83,7 +83,7 @@ func TestRunnerAgent_toolLoop_invokesHandle(t *testing.T) {
 		},
 	}
 
-	a := NewRunnerAgent(mockToolLoopChatModel{},
+	a := New(mockToolLoopChatModel{},
 		WithToolInfos(infos),
 		WithMaxSteps(6),
 	)
@@ -126,9 +126,9 @@ func TestRunnerAgent_toolLoop_invokesHandle(t *testing.T) {
 	}
 }
 
-func TestRunnerAgent_toolLoop_noTransferRegression(t *testing.T) {
+func TestAgent_toolLoop_noTransferRegression(t *testing.T) {
 	ctx := context.Background()
-	a := NewRunnerAgent(mockFinalChatModel{text: "standalone response"},
+	a := New(mockFinalChatModel{text: "standalone response"},
 		WithMaxSteps(4),
 	)
 	ch := a.Run(ctx, &request.RuntimeRequest{

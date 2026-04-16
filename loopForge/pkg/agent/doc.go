@@ -1,9 +1,7 @@
-// Package agent defines the minimal runnable contracts from doc/design/abstractions.md section 2.4
-// (Agent, Planner) and the default concrete Agent: RunnerAgent — a pkg/model chat loop with
-// function calling. Tool execution helpers live in loopforge/pkg/tool.
+// Package agent defines the runnable contract (Runnable) and the default
+// concrete agent: Agent — a pkg/model chat loop with function calling and
+// multi-agent transfer capabilities.
 //
-// Runner is the top-level execution entry point. Create a Runner via NewRunner
-// with an entry RunnerAgent. If the entry agent has handoff targets (registered
-// via AddHandoff), the Runner automatically manages the transfer loop with
-// per-run Clone for concurrency isolation.
+// Tool execution helpers live in loopforge/pkg/tool.
+// The top-level Runner orchestrator lives in loopforge/pkg/runner.
 package agent

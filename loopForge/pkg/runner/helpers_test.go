@@ -1,8 +1,9 @@
-package agent
+package runner
 
 import (
 	"context"
 
+	"loopforge/pkg/agent"
 	modeliface "loopforge/pkg/model/interface"
 	"loopforge/pkg/model/types"
 	"loopforge/pkg/runtime/event"
@@ -27,7 +28,7 @@ func (m mockTransferChatModel) Generate(_ context.Context, _ []*types.Message, _
 		Content: "",
 		ToolCalls: []types.ToolCallPart{{
 			ID:        "call_transfer_1",
-			Name:      TransferToolPrefix + m.target,
+			Name:      agent.TransferToolPrefix + m.target,
 			Arguments: `{"reason":"user needs math help"}`,
 		}},
 	}, nil

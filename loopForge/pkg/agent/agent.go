@@ -10,7 +10,7 @@ import (
 	"loopforge/pkg/tool"
 )
 
-// ToolInterceptor, when set on a RunnerAgent, is called before executing each
+// ToolInterceptor, when set on an Agent, is called before executing each
 // tool call. If it returns true the tool call is intercepted: RunLoop returns
 // an *InterceptedCall instead of invoking the tool through tool.Invoke.
 type ToolInterceptor func(tc model.ToolCallPart) bool
@@ -32,18 +32,17 @@ type LoopState struct {
 	SuppressBookends   bool // skip Start/Question (already emitted by first agent)
 }
 
-// RunnerAgent is a concrete Agent that drives a tool-calling loop using
-// pkg/model only. Model access (HTTP/SDK provider wiring) stays in pkg/model
-// adapters; this type does not use agent-sdk-go Agent or Runner.
+// Agent is a concrete Runnable that drives a tool-calling loop using pkg/model.
+// Model access (HTTP/SDK provider wiring) stays in pkg/model adapters.
 //
 // Function calling: register ToolInfos (schema for the model). For each tool,
 // set ToolInfo.Handle to bind the local Go function, and/or set Executor as a
 // fallback (see loopforge/pkg/tool).
 //
-// Transfer (handoff): call AddHandoff to register other RunnerAgent instances
-// as allowed transfer targets. Use Runner (NewRunner) to execute the agent
-// graph — it automatically handles the transfer loop and per-run cloning.
-type RunnerAgent struct {
+// Transfer (handoff): call AddHandoff to register other Agent instances as
+// allowed transfer targets. Use Runner (pkg/runner.NewRunner) to execute the
+// agent graph — it automatically handles the transfer loop and per-run cloning.
+type Agent struct {
 	Name               string
 	Description        string // human-readable summary; surfaced in transfer tool descriptions
 	ModelName          string
@@ -67,24 +66,24 @@ type RunnerAgent struct {
 	// of invoking the tool.
 	ToolInterceptor ToolInterceptor
 
-	handoffs []*RunnerAgent
+	handoffs []*Agent
 }
 
 // AddHandoff registers one or more agents as allowed transfer (handoff) targets.
 // The Runner reads these at runtime to build transfer_to_{name} tools.
-func (a *RunnerAgent) AddHandoff(targets ...*RunnerAgent) {
+func (a *Agent) AddHandoff(targets ...*Agent) {
 	a.handoffs = append(a.handoffs, targets...)
 }
 
 // Handoffs returns the registered transfer targets.
-func (a *RunnerAgent) Handoffs() []*RunnerAgent {
+func (a *Agent) Handoffs() []*Agent {
 	return a.handoffs
 }
 
-// Clone creates a shallow copy of the RunnerAgent with independent slice
-// headers. The elements themselves (e.g. *ToolInfo, *RunnerAgent in handoffs)
-// are shared — they are treated as immutable templates.
-func (a *RunnerAgent) Clone() *RunnerAgent {
+// Clone creates a shallow copy of the Agent with independent slice headers.
+// The elements themselves (e.g. *ToolInfo, *Agent in handoffs) are shared —
+// they are treated as immutable templates.
+func (a *Agent) Clone() *Agent {
 	c := *a
 	if a.ToolInfos != nil {
 		c.ToolInfos = make([]*model.ToolInfo, len(a.ToolInfos))
@@ -99,17 +98,17 @@ func (a *RunnerAgent) Clone() *RunnerAgent {
 		copy(c.CallOptions, a.CallOptions)
 	}
 	if a.handoffs != nil {
-		c.handoffs = make([]*RunnerAgent, len(a.handoffs))
+		c.handoffs = make([]*Agent, len(a.handoffs))
 		copy(c.handoffs, a.handoffs)
 	}
 	return &c
 }
 
-var _ Agent = (*RunnerAgent)(nil)
+var _ Runnable = (*Agent)(nil)
 
 // Run starts the agent loop in a goroutine and returns a channel that streams
 // RuntimeEvents. The channel is closed when the run finishes.
-func (a *RunnerAgent) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *event.RuntimeEvent {
+func (a *Agent) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *event.RuntimeEvent {
 	ch := make(chan *event.RuntimeEvent, 8)
 
 	go func() {

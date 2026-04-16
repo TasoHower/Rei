@@ -7,7 +7,7 @@ import (
 )
 
 func TestClone_SliceIsolation(t *testing.T) {
-	original := &RunnerAgent{
+	original := &Agent{
 		Name:        "original",
 		Description: "test agent",
 		ToolInfos:   []*model.ToolInfo{{Name: "t1"}},
@@ -15,7 +15,7 @@ func TestClone_SliceIsolation(t *testing.T) {
 		CallOptions: []model.CallOption{model.WithTemperature(0.5)},
 	}
 
-	other := &RunnerAgent{Name: "other"}
+	other := &Agent{Name: "other"}
 	original.AddHandoff(other)
 
 	cloned := original.Clone()
@@ -24,7 +24,7 @@ func TestClone_SliceIsolation(t *testing.T) {
 	cloned.ToolInfos = append(cloned.ToolInfos, &model.ToolInfo{Name: "t2"})
 	cloned.ExtraTools = append(cloned.ExtraTools, &model.ToolInfo{Name: "e2"})
 	cloned.CallOptions = append(cloned.CallOptions, model.WithTemperature(0.9))
-	cloned.AddHandoff(&RunnerAgent{Name: "extra"})
+	cloned.AddHandoff(&Agent{Name: "extra"})
 
 	if len(original.ToolInfos) != 1 {
 		t.Fatalf("ToolInfos mutated: got %d, want 1", len(original.ToolInfos))
@@ -41,7 +41,7 @@ func TestClone_SliceIsolation(t *testing.T) {
 }
 
 func TestClone_ScalarCopy(t *testing.T) {
-	original := &RunnerAgent{
+	original := &Agent{
 		Name:               "orig",
 		Description:        "desc",
 		ModelName:          "model-1",
@@ -66,7 +66,7 @@ func TestClone_ScalarCopy(t *testing.T) {
 }
 
 func TestClone_NilSlices(t *testing.T) {
-	original := &RunnerAgent{Name: "bare"}
+	original := &Agent{Name: "bare"}
 	cloned := original.Clone()
 
 	if cloned.ToolInfos != nil {

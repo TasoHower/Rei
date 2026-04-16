@@ -25,6 +25,7 @@ import (
 	"loopforge/pkg/agent"
 	"loopforge/pkg/model"
 	arkdoubao "loopforge/pkg/model/adapters/doubao"
+	"loopforge/pkg/runner"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
 )
@@ -165,7 +166,7 @@ func mathToolInfos() []*model.ToolInfo {
 
 func runSingleAgent(ctx context.Context, cfg demoConfig) {
 	chat := arkdoubao.NewArkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
-	runner := agent.NewRunnerAgent(chat,
+	runner := agent.New(chat,
 		agent.WithName("agentdemo"),
 		agent.WithModelName(cfg.Model),
 		agent.WithMaxSteps(12),
@@ -188,7 +189,7 @@ When multiple steps depend on previous results, call them one step at a time and
 func runTransferDemo(ctx context.Context, cfg demoConfig) {
 	chat := arkdoubao.NewArkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
 
-	triage := agent.NewRunnerAgent(chat,
+	triage := agent.New(chat,
 		agent.WithName("triage"),
 		agent.WithDescription("Routes user requests to the appropriate specialist agent."),
 		agent.WithModelName(cfg.Model),
@@ -200,7 +201,7 @@ Do NOT attempt to answer yourself. Always transfer to a specialist.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 	)
 
-	mathExpert := agent.NewRunnerAgent(chat,
+	mathExpert := agent.New(chat,
 		agent.WithName("math_expert"),
 		agent.WithDescription("Solves math problems step by step using arithmetic tools."),
 		agent.WithModelName(cfg.Model),
@@ -212,7 +213,7 @@ When multiple steps depend on previous results, call them one step at a time.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 	)
 
-	writer := agent.NewRunnerAgent(chat,
+	writer := agent.New(chat,
 		agent.WithName("writer"),
 		agent.WithDescription("Creates creative text, stories, poems, and other written content."),
 		agent.WithModelName(cfg.Model),
@@ -225,13 +226,13 @@ Be creative and thoughtful in your writing.`),
 	triage.AddHandoff(mathExpert, writer)
 	mathExpert.AddHandoff(triage)
 
-	r := agent.NewRunner(triage, agent.WithMaxTransfers(5))
+	r := runner.NewRunner(triage, runner.WithMaxTransfers(5))
 	streamAndPrint(ctx, r, cfg)
 }
 
 // --- shared event printer ---
 
-func streamAndPrint(ctx context.Context, ag agent.Agent, cfg demoConfig) {
+func streamAndPrint(ctx context.Context, ag agent.Runnable, cfg demoConfig) {
 	req := &request.RuntimeRequest{
 		SessionID:   "agentdemo-session",
 		UserMessage: cfg.UserMessage,

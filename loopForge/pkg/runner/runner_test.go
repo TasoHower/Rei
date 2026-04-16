@@ -1,27 +1,28 @@
-package agent
+package runner
 
 import (
 	"context"
 	"sync"
 	"testing"
 
+	"loopforge/pkg/agent"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 )
 
 func TestRunner_Transfer_HappyPath(t *testing.T) {
-	triage := NewRunnerAgent(
+	triage := agent.New(
 		mockTransferChatModel{target: "expert"},
-		WithName("triage"),
-		WithDescription("Routes requests"),
-		WithSystemInstructions("You are triage."),
+		agent.WithName("triage"),
+		agent.WithDescription("Routes requests"),
+		agent.WithSystemInstructions("You are triage."),
 	)
-	expert := NewRunnerAgent(
+	expert := agent.New(
 		mockFinalChatModel{text: "The answer is 42."},
-		WithName("expert"),
-		WithDescription("Handles expert tasks"),
-		WithSystemInstructions("You are an expert."),
+		agent.WithName("expert"),
+		agent.WithDescription("Handles expert tasks"),
+		agent.WithSystemInstructions("You are an expert."),
 	)
 	triage.AddHandoff(expert)
 
@@ -72,13 +73,13 @@ func TestRunner_Transfer_HappyPath(t *testing.T) {
 }
 
 func TestRunner_MaxTransfers_Exceeded(t *testing.T) {
-	ping := NewRunnerAgent(
+	ping := agent.New(
 		mockTransferChatModel{target: "pong"},
-		WithName("ping"),
+		agent.WithName("ping"),
 	)
-	pong := NewRunnerAgent(
+	pong := agent.New(
 		mockTransferChatModel{target: "ping"},
-		WithName("pong"),
+		agent.WithName("pong"),
 	)
 	ping.AddHandoff(pong)
 	pong.AddHandoff(ping)
@@ -115,10 +116,10 @@ func TestRunner_MaxTransfers_Exceeded(t *testing.T) {
 }
 
 func TestRunner_SingleAgent_NoTransfer(t *testing.T) {
-	solo := NewRunnerAgent(
+	solo := agent.New(
 		mockFinalChatModel{text: "Just me."},
-		WithName("solo"),
-		WithSystemInstructions("solo agent"),
+		agent.WithName("solo"),
+		agent.WithSystemInstructions("solo agent"),
 	)
 
 	r := NewRunner(solo)
@@ -143,13 +144,13 @@ func TestRunner_SingleAgent_NoTransfer(t *testing.T) {
 }
 
 func TestRunner_Transfer_NoToolCallEvents(t *testing.T) {
-	triage := NewRunnerAgent(
+	triage := agent.New(
 		mockTransferChatModel{target: "expert"},
-		WithName("triage"),
+		agent.WithName("triage"),
 	)
-	expert := NewRunnerAgent(
+	expert := agent.New(
 		mockFinalChatModel{text: "done"},
-		WithName("expert"),
+		agent.WithName("expert"),
 	)
 	triage.AddHandoff(expert)
 
@@ -168,13 +169,13 @@ func TestRunner_Transfer_NoToolCallEvents(t *testing.T) {
 }
 
 func TestRunner_ConcurrentRuns(t *testing.T) {
-	triage := NewRunnerAgent(
+	triage := agent.New(
 		mockTransferChatModel{target: "expert"},
-		WithName("triage"),
+		agent.WithName("triage"),
 	)
-	expert := NewRunnerAgent(
+	expert := agent.New(
 		mockFinalChatModel{text: "answer"},
-		WithName("expert"),
+		agent.WithName("expert"),
 	)
 	triage.AddHandoff(expert)
 

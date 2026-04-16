@@ -12,9 +12,15 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/protocol/sse"
 
+	"log/slog"
+
+	"github.com/cloudwego/hertz/pkg/common/hlog"
+
 	"loopforge/pkg/agent"
+	"loopforge/pkg/log"
 	"loopforge/pkg/model"
 	arkdoubao "loopforge/pkg/model/adapters/doubao"
+	"loopforge/pkg/runner"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
 )
@@ -147,9 +153,9 @@ func mathToolInfos() []*model.ToolInfo {
 
 // --- agent builders ---
 
-func buildSingleAgent(req *ChatRequest) agent.Agent {
+func buildSingleAgent(req *ChatRequest) agent.Runnable {
 	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
-	return agent.NewRunnerAgent(chat,
+	return agent.New(chat,
 		agent.WithName("test-server-agent"),
 		agent.WithModelName(req.Model),
 		agent.WithMaxSteps(12),
@@ -159,10 +165,10 @@ func buildSingleAgent(req *ChatRequest) agent.Agent {
 	)
 }
 
-func buildTransferAgent(req *ChatRequest) agent.Agent {
+func buildTransferAgent(req *ChatRequest) agent.Runnable {
 	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
 
-	triage := agent.NewRunnerAgent(chat,
+	triage := agent.New(chat,
 		agent.WithName("triage"),
 		agent.WithDescription("Analyzes the user's request and routes to the appropriate specialist."),
 		agent.WithModelName(req.Model),
@@ -174,7 +180,7 @@ Do NOT attempt to answer yourself. Always transfer to a specialist.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 	)
 
-	mathExpert := agent.NewRunnerAgent(chat,
+	mathExpert := agent.New(chat,
 		agent.WithName("math_expert"),
 		agent.WithDescription("Solves math problems step by step using arithmetic tools (add, subtract, multiply, divide)."),
 		agent.WithModelName(req.Model),
@@ -186,7 +192,7 @@ When multiple steps depend on previous results, call them one step at a time.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 	)
 
-	writer := agent.NewRunnerAgent(chat,
+	writer := agent.New(chat,
 		agent.WithName("writer"),
 		agent.WithDescription("Creates creative text, stories, poems, and other written content."),
 		agent.WithModelName(req.Model),
@@ -199,12 +205,15 @@ Be creative and thoughtful in your writing.`),
 	triage.AddHandoff(mathExpert, writer)
 	mathExpert.AddHandoff(triage)
 
-	return agent.NewRunner(triage, agent.WithMaxTransfers(5))
+	return runner.NewRunner(triage,
+		runner.WithMaxTransfers(5),
+		runner.WithLogger(log.Default()),
+	)
 }
 
 // --- handler ---
 
-func handleChat() app.HandlerFunc {
+func handleChat(logger log.Logger) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
 		var chatReq ChatRequest
 		if err := c.BindJSON(&chatReq); err != nil {
@@ -223,7 +232,13 @@ func handleChat() app.HandlerFunc {
 			return
 		}
 
-		var ag agent.Agent
+		logger.Info("chat request received",
+			"mode", chatReq.Mode,
+			"model", chatReq.Model,
+			"session_id", chatReq.SessionID,
+		)
+
+		var ag agent.Runnable
 		switch chatReq.Mode {
 		case "transfer":
 			ag = buildTransferAgent(&chatReq)
@@ -257,6 +272,11 @@ func handleChat() app.HandlerFunc {
 			)
 		}
 		w.Close()
+
+		logger.Info("chat request completed",
+			"session_id", sessionID,
+			"events", eventID,
+		)
 	}
 }
 
@@ -314,14 +334,16 @@ func main() {
 		addr = ":8080"
 	}
 
-	h := server.Default(server.WithHostPorts(addr))
+	logger := slog.Default()
+
+	hlog.SetSilentMode(true)
+	h := server.New(server.WithHostPorts(addr))
 
 	h.StaticFile("/", "./static/index.html")
 	h.Static("/static", "./static")
 
-	h.POST("/api/chat", handleChat())
+	h.POST("/api/chat", handleChat(logger))
 
-	fmt.Printf("loopForge test-server starting on %s\n", addr)
-	fmt.Printf("  open http://localhost%s in browser\n", addr)
+	logger.Info("loopForge test-server starting", "addr", addr)
 	h.Spin()
 }

@@ -5,12 +5,12 @@ import (
 	"loopforge/pkg/tool"
 )
 
-// RunnerOption configures a RunnerAgent when passed to NewRunnerAgent.
-type RunnerOption func(*RunnerAgent)
+// Option configures an Agent when passed to New.
+type Option func(*Agent)
 
-// NewRunnerAgent builds a RunnerAgent with a required chat model and optional RunnerOption values.
-func NewRunnerAgent(chat model.ToolCallingChatModel, opts ...RunnerOption) *RunnerAgent {
-	a := &RunnerAgent{ChatModel: chat}
+// New builds an Agent with a required chat model and optional Option values.
+func New(chat model.ToolCallingChatModel, opts ...Option) *Agent {
+	a := &Agent{ChatModel: chat}
 	for _, o := range opts {
 		if o != nil {
 			o(a)
@@ -21,58 +21,58 @@ func NewRunnerAgent(chat model.ToolCallingChatModel, opts ...RunnerOption) *Runn
 
 // WithDescription sets a human-readable summary used in transfer tool
 // descriptions when this agent is a handoff target.
-func WithDescription(d string) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithDescription(d string) Option {
+	return func(a *Agent) {
 		a.Description = d
 	}
 }
 
 // WithSystemInstructions sets the system prompt prepended as a system message.
-func WithSystemInstructions(s string) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithSystemInstructions(s string) Option {
+	return func(a *Agent) {
 		a.SystemInstructions = s
 	}
 }
 
 // WithName sets an agent display / identity name (e.g. for logging).
-func WithName(name string) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithName(name string) Option {
+	return func(a *Agent) {
 		a.Name = name
 	}
 }
 
 // WithModelName records the model identifier for metrics/observability.
 // This is the default; RuntimeRequest.Options.Model overrides it per-request.
-func WithModelName(m string) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithModelName(m string) Option {
+	return func(a *Agent) {
 		a.ModelName = m
 	}
 }
 
 // WithToolInfos registers OpenAI-style tool definitions passed to the chat model.
-func WithToolInfos(infos []*model.ToolInfo) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithToolInfos(infos []*model.ToolInfo) Option {
+	return func(a *Agent) {
 		a.ToolInfos = infos
 	}
 }
 
 // WithExecutor sets the fallback tool executor (see loopforge/pkg/tool).
-func WithExecutor(ex tool.ToolExecutor) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithExecutor(ex tool.ToolExecutor) Option {
+	return func(a *Agent) {
 		a.Executor = ex
 	}
 }
 
 // WithMaxSteps sets the default max loop steps (Run may still override from request options).
-func WithMaxSteps(n int) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithMaxSteps(n int) Option {
+	return func(a *Agent) {
 		a.MaxSteps = n
 	}
 }
 
 // WithCallOptions appends model call options applied on every Generate (e.g. temperature).
-func WithCallOptions(opts ...model.CallOption) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithCallOptions(opts ...model.CallOption) Option {
+	return func(a *Agent) {
 		a.CallOptions = append(a.CallOptions, opts...)
 	}
 }
@@ -80,8 +80,8 @@ func WithCallOptions(opts ...model.CallOption) RunnerOption {
 // WithExtraTools appends additional tool definitions that are sent to the model
 // but skipped during tool.ValidateBindings (they carry no Handle). Used by
 // orchestrators to inject control-flow tools such as transfer_to_{name}.
-func WithExtraTools(tools []*model.ToolInfo) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithExtraTools(tools []*model.ToolInfo) Option {
+	return func(a *Agent) {
 		a.ExtraTools = tools
 	}
 }
@@ -89,8 +89,8 @@ func WithExtraTools(tools []*model.ToolInfo) RunnerOption {
 // WithToolInterceptor sets a callback checked before each tool execution. If
 // the callback returns true, RunLoop returns an *InterceptedCall instead of
 // invoking the tool.
-func WithToolInterceptor(fn ToolInterceptor) RunnerOption {
-	return func(a *RunnerAgent) {
+func WithToolInterceptor(fn ToolInterceptor) Option {
+	return func(a *Agent) {
 		a.ToolInterceptor = fn
 	}
 }

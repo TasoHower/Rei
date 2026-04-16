@@ -1,9 +1,11 @@
-package agent
+package runner
 
 import (
 	"context"
 	"fmt"
 
+	"loopforge/pkg/agent"
+	"loopforge/pkg/log"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
@@ -19,20 +21,22 @@ const defaultMaxTransfers = 10
 // For single-agent use without transfers, Runner works identically to calling
 // RunnerAgent.Run directly.
 type Runner struct {
-	entryAgent   *RunnerAgent
+	entryAgent   *agent.Agent
 	maxTransfers int
+	logger       log.Logger
 }
 
-var _ Agent = (*Runner)(nil)
+var _ agent.Runnable = (*Runner)(nil)
 
 // RunOption configures a Runner when passed to NewRunner.
 type RunOption func(*Runner)
 
 // NewRunner creates a Runner that starts execution from entryAgent.
-func NewRunner(entryAgent *RunnerAgent, opts ...RunOption) *Runner {
+func NewRunner(entryAgent *agent.Agent, opts ...RunOption) *Runner {
 	r := &Runner{
 		entryAgent:   entryAgent,
 		maxTransfers: defaultMaxTransfers,
+		logger:       log.Default(),
 	}
 	for _, o := range opts {
 		if o != nil {
@@ -40,6 +44,17 @@ func NewRunner(entryAgent *RunnerAgent, opts ...RunOption) *Runner {
 		}
 	}
 	return r
+}
+
+// WithLogger sets a structured logger for the Runner. By default the Runner
+// uses log.Default() (slog-backed). Pass log.Nop() to silence, or
+// log.FromSugared(zapLogger.Sugar()) for zap.
+func WithLogger(l log.Logger) RunOption {
+	return func(r *Runner) {
+		if l != nil {
+			r.logger = l
+		}
+	}
 }
 
 // WithMaxTransfers sets the maximum number of agent-to-agent transfers allowed
@@ -61,8 +76,15 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 	go func() {
 		defer close(ch)
 		if len(r.entryAgent.Handoffs()) > 0 {
+			r.logger.Debug("run started in transfer mode",
+				"entry_agent", r.entryAgent.Name,
+				"handoffs", len(r.entryAgent.Handoffs()),
+			)
 			r.runTransferLoop(ctx, req, ch)
 		} else {
+			r.logger.Debug("run started in single-agent mode",
+				"agent", r.entryAgent.Name,
+			)
 			r.entryAgent.RunLoop(ctx, req, ch, nil, nil)
 		}
 	}()
@@ -89,9 +111,16 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 	}
 
 	if r.entryAgent == nil {
+		r.logger.Error("entry agent is nil")
 		emitError("invalid_config", "Runner.entryAgent is nil")
 		return
 	}
+
+	r.logger.Info("transfer loop started",
+		"run_id", runID,
+		"entry_agent", r.entryAgent.Name,
+		"max_transfers", r.maxTransfers,
+	)
 
 	current := r.entryAgent
 	var inheritedMsgs []*model.Message
@@ -101,27 +130,41 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 	firstAgent := true
 
 	for {
-		runner := current.Clone()
-		runner.ExtraTools = buildTransferTools(current)
-		runner.ToolInterceptor = isTransferTool
-		if p := buildTransferPrompt(current); p != "" {
-			runner.SystemInstructions += p
+		a := current.Clone()
+		a.ExtraTools = agent.BuildTransferTools(current)
+		a.ToolInterceptor = agent.IsTransferTool
+		if p := agent.BuildTransferPrompt(current); p != "" {
+			a.SystemInstructions += p
 		}
 
-		st := &LoopState{
+		st := &agent.LoopState{
 			AccumulatedMetrics: accumulated,
 			TransferChain:      transferChain,
 			SuppressBookends:   !firstAgent,
 		}
 
-		result := runner.RunLoop(ctx, req, ch, inheritedMsgs, st)
+		r.logger.Debug("agent executing",
+			"agent", current.Name,
+			"transfer_count", transferCount,
+		)
+
+		result := a.RunLoop(ctx, req, ch, inheritedMsgs, st)
 
 		if result == nil {
+			r.logger.Info("transfer loop completed",
+				"run_id", runID,
+				"last_agent", current.Name,
+				"total_transfers", transferCount,
+			)
 			return
 		}
 
 		transferCount++
 		if transferCount > r.maxTransfers {
+			r.logger.Warn("max transfers exceeded",
+				"run_id", runID,
+				"limit", r.maxTransfers,
+			)
 			emitError("max_transfers", "exceeded maximum transfer count")
 			return
 		}
@@ -134,14 +177,26 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 			accumulated.Model = result.Metrics.Model
 		}
 
-		target := targetAgent(result.ToolCall.Name)
-		reason := extractReason(result.ToolCall.Arguments)
+		target := agent.TargetAgent(result.ToolCall.Name)
+		reason := agent.ExtractReason(result.ToolCall.Arguments)
 
 		next := findHandoff(current, target)
 		if next == nil {
+			r.logger.Error("invalid transfer target",
+				"run_id", runID,
+				"from", current.Name,
+				"target", target,
+			)
 			emitError("invalid_transfer", "target agent not found in handoffs: "+target)
 			return
 		}
+
+		r.logger.Info("agent transfer",
+			"run_id", runID,
+			"from", current.Name,
+			"to", target,
+			"reason", reason,
+		)
 
 		transferChain = append(transferChain, current.Name)
 
@@ -163,11 +218,18 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 	}
 }
 
-func findHandoff(a *RunnerAgent, name string) *RunnerAgent {
+func findHandoff(a *agent.Agent, name string) *agent.Agent {
 	for _, h := range a.Handoffs() {
 		if h.Name == name {
 			return h
 		}
 	}
 	return nil
+}
+
+func runIDFrom(req *request.RuntimeRequest) string {
+	if req.SessionID != "" {
+		return req.SessionID
+	}
+	return "run"
 }

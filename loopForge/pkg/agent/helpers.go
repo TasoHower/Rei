@@ -16,7 +16,7 @@ type loopSetupError struct {
 
 // bindModel merges ExtraTools with ToolInfos, validates bindings, and returns
 // a tool-bound model ready for streaming.
-func (a *RunnerAgent) bindModel() (model.ToolCallingChatModel, *loopSetupError) {
+func (a *Agent) bindModel() (model.ToolCallingChatModel, *loopSetupError) {
 	allTools := a.ToolInfos
 	if len(a.ExtraTools) > 0 {
 		merged := make([]*model.ToolInfo, 0, len(a.ToolInfos)+len(a.ExtraTools))
@@ -44,7 +44,7 @@ func (a *RunnerAgent) bindModel() (model.ToolCallingChatModel, *loopSetupError) 
 
 // resolveMaxSteps determines the effective max loop iterations from the
 // agent default, falling back to 16, with per-request override.
-func (a *RunnerAgent) resolveMaxSteps(req *request.RuntimeRequest) int {
+func (a *Agent) resolveMaxSteps(req *request.RuntimeRequest) int {
 	maxSteps := a.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = 16
@@ -57,7 +57,7 @@ func (a *RunnerAgent) resolveMaxSteps(req *request.RuntimeRequest) int {
 
 // resolveCallOptions builds the effective call options and model name from
 // agent defaults merged with per-request overrides.
-func (a *RunnerAgent) resolveCallOptions(req *request.RuntimeRequest) ([]model.CallOption, string) {
+func (a *Agent) resolveCallOptions(req *request.RuntimeRequest) ([]model.CallOption, string) {
 	opts := append([]model.CallOption(nil), a.CallOptions...)
 	modelName := a.ModelName
 	if req.Options.Model != "" {
@@ -69,7 +69,7 @@ func (a *RunnerAgent) resolveCallOptions(req *request.RuntimeRequest) ([]model.C
 
 // buildMessages constructs the initial message slice from either inherited
 // conversation history or fresh system + user messages.
-func (a *RunnerAgent) buildMessages(inheritedMsgs []*model.Message, req *request.RuntimeRequest) []*model.Message {
+func (a *Agent) buildMessages(inheritedMsgs []*model.Message, req *request.RuntimeRequest) []*model.Message {
 	if inheritedMsgs != nil {
 		return replaceSystemMessage(inheritedMsgs, a.SystemInstructions)
 	}
