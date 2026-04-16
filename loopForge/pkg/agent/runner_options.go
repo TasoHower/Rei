@@ -68,3 +68,21 @@ func WithCallOptions(opts ...model.CallOption) RunnerOption {
 		a.CallOptions = append(a.CallOptions, opts...)
 	}
 }
+
+// WithExtraTools appends additional tool definitions that are sent to the model
+// but skipped during tool.ValidateBindings (they carry no Handle). Used by
+// orchestrators to inject control-flow tools such as transfer_to_{name}.
+func WithExtraTools(tools []*model.ToolInfo) RunnerOption {
+	return func(a *RunnerAgent) {
+		a.ExtraTools = tools
+	}
+}
+
+// WithToolInterceptor sets a callback checked before each tool execution. If
+// the callback returns true, RunLoop returns an *InterceptedCall instead of
+// invoking the tool.
+func WithToolInterceptor(fn ToolInterceptor) RunnerOption {
+	return func(a *RunnerAgent) {
+		a.ToolInterceptor = fn
+	}
+}

@@ -17,6 +17,7 @@ import (
 	arkdoubao "loopforge/pkg/model/adapters/doubao"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/transfer"
 )
 
 const (
@@ -39,6 +40,7 @@ type ChatRequest struct {
 	BaseURL      string `json:"base_url,omitempty"`
 	Model        string `json:"model,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`
+	Mode         string `json:"mode,omitempty"` // "single" (default) or "transfer"
 }
 
 // SSEEvent is the JSON payload written as SSE data for each RuntimeEvent.
@@ -62,6 +64,9 @@ func (r *ChatRequest) resolveDefaults() {
 	if r.SystemPrompt == "" {
 		r.SystemPrompt = defaultSystemPrompt
 	}
+	if r.Mode == "" {
+		r.Mode = "single"
+	}
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -84,7 +89,7 @@ func parseBinaryArgs(raw string) (a, b float64, err error) {
 	return args.A, args.B, nil
 }
 
-func demoToolInfos() []*model.ToolInfo {
+func mathToolInfos() []*model.ToolInfo {
 	binarySchema := map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -141,17 +146,65 @@ func demoToolInfos() []*model.ToolInfo {
 	}
 }
 
-func buildAgent(req *ChatRequest) agent.Agent {
+// --- agent builders ---
+
+func buildSingleAgent(req *ChatRequest) agent.Agent {
 	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
 	return agent.NewRunnerAgent(chat,
 		agent.WithName("test-server-agent"),
 		agent.WithModelName(req.Model),
 		agent.WithMaxSteps(12),
-		agent.WithToolInfos(demoToolInfos()),
+		agent.WithToolInfos(mathToolInfos()),
 		agent.WithSystemInstructions(req.SystemPrompt),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 	)
 }
+
+func buildTransferAgent(req *ChatRequest) agent.Agent {
+	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
+	registry := transfer.NewRegistry()
+
+	_ = registry.Register(transfer.AgentConfig{
+		Name:        "triage",
+		Description: "Analyzes the user's request and routes to the appropriate specialist.",
+		ModelName:   req.Model,
+		SystemInstructions: `You are a triage agent. Analyze the user's request and transfer to the right specialist:
+- For math/calculation tasks → transfer to "math_expert"
+- For writing/creative/other tasks → transfer to "writer"
+Do NOT attempt to answer yourself. Always transfer to a specialist.`,
+		ChatModel:   chat,
+		MaxSteps:    4,
+		CallOptions: []model.CallOption{model.WithTemperature(0.1)},
+	})
+
+	_ = registry.Register(transfer.AgentConfig{
+		Name:        "math_expert",
+		Description: "Solves math problems step by step using arithmetic tools (add, subtract, multiply, divide).",
+		ModelName:   req.Model,
+		SystemInstructions: `You are a math expert. You have four arithmetic tools: add, subtract, multiply, divide.
+You MUST call tools for every calculation step. Never compute in your head.
+When multiple steps depend on previous results, call them one step at a time.`,
+		ChatModel:   chat,
+		ToolInfos:   mathToolInfos(),
+		MaxSteps:    12,
+		CallOptions: []model.CallOption{model.WithTemperature(0.1)},
+	})
+
+	_ = registry.Register(transfer.AgentConfig{
+		Name:        "writer",
+		Description: "Creates creative text, stories, poems, and other written content.",
+		ModelName:   req.Model,
+		SystemInstructions: `You are a creative writer. Produce engaging, well-structured text based on the user's request.
+Be creative and thoughtful in your writing.`,
+		ChatModel:   chat,
+		MaxSteps:    6,
+		CallOptions: []model.CallOption{model.WithTemperature(0.7)},
+	})
+
+	return transfer.NewOrchestrator(registry, "triage", transfer.WithMaxTransfers(5))
+}
+
+// --- handler ---
 
 func handleChat() app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
@@ -172,7 +225,13 @@ func handleChat() app.HandlerFunc {
 			return
 		}
 
-		ag := buildAgent(&chatReq)
+		var ag agent.Agent
+		switch chatReq.Mode {
+		case "transfer":
+			ag = buildTransferAgent(&chatReq)
+		default:
+			ag = buildSingleAgent(&chatReq)
+		}
 
 		sessionID := chatReq.SessionID
 		if sessionID == "" {

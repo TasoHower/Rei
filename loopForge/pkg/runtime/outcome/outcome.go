@@ -2,11 +2,12 @@ package outcome
 
 // RuntimeOutcome is the synchronous or end-of-stream summary for a run.
 type RuntimeOutcome struct {
-	RunID       string
-	FinalText   string
-	Termination TerminationReason
-	Metrics     RunMetrics
-	ChildRunIDs []string
+	RunID         string
+	FinalText     string
+	Termination   TerminationReason
+	Metrics       RunMetrics
+	ChildRunIDs   []string
+	TransferChain []string // ordered agent names visited during transfer handoffs
 }
 
 // TerminationReason explains why the run stopped.

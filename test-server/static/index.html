@@ -17,6 +17,8 @@
       --warning: #fdcb6e;
       --error: #d63031;
       --tool: #0984e3;
+      --transfer-from: #e17055;
+      --transfer-to: #00cec9;
       --user-bg: #6c5ce7;
       --agent-bg: #1e2235;
       --radius: 16px;
@@ -98,15 +100,50 @@
     .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .config-grid .full-width { grid-column: 1 / -1; }
     .field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-dim); margin-bottom: 4px; }
-    .field input, .field textarea {
+    .field input, .field textarea, .field select {
       width: 100%; padding: 8px 12px; border-radius: 6px;
       border: 1px solid var(--border); background: var(--bg);
       color: var(--text); font-size: 13px; font-family: inherit; outline: none;
     }
-    .field input:focus, .field textarea:focus { border-color: var(--accent); }
+    .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
     .field input::placeholder, .field textarea::placeholder { color: var(--text-dim); }
     .field textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
     .field .hint { font-size: 11px; color: var(--text-dim); margin-top: 3px; opacity: 0.7; }
+    .field select option { background: var(--bg); color: var(--text); }
+
+    /* ── Mode selector ── */
+    .mode-selector {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-dim);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .mode-btn:hover { border-color: var(--accent); color: var(--text); }
+    .mode-btn.active {
+      border-color: var(--accent);
+      background: rgba(108,92,231,0.12);
+      color: var(--accent-light);
+      font-weight: 600;
+    }
+    .mode-desc {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+      line-height: 1.4;
+      font-weight: 400;
+    }
 
     /* ── Chat Area ── */
     #chatArea {
@@ -160,6 +197,18 @@
       background: var(--agent-bg);
       border: 1px solid var(--border);
       border-radius: var(--radius) var(--radius) var(--radius) 4px;
+    }
+    .bubble .agent-label {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      margin-bottom: 4px;
+      background: rgba(108,92,231,0.15);
+      color: var(--accent-light);
     }
     .bubble-row.agent .bubble.streaming::after {
       content: '';
@@ -230,6 +279,69 @@
       word-break: break-all;
     }
 
+    /* ── Transfer banner ── */
+    .transfer-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0;
+      padding: 10px 16px;
+      background: linear-gradient(135deg, rgba(225,112,85,0.08), rgba(0,206,201,0.08));
+      border: 1px solid rgba(0,184,148,0.2);
+      border-radius: 10px;
+      animation: fadeUp 0.25s ease-out;
+    }
+    .transfer-arrow {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .transfer-arrow .from {
+      color: var(--transfer-from);
+      padding: 2px 8px;
+      background: rgba(225,112,85,0.12);
+      border-radius: 4px;
+    }
+    .transfer-arrow .arrow-icon {
+      color: var(--text-dim);
+      font-size: 16px;
+    }
+    .transfer-arrow .to {
+      color: var(--transfer-to);
+      padding: 2px 8px;
+      background: rgba(0,206,201,0.12);
+      border-radius: 4px;
+    }
+    .transfer-reason {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-style: italic;
+      margin-left: auto;
+    }
+
+    /* ── Transfer chain in done ── */
+    .chain-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    .chain-node {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: rgba(108,92,231,0.12);
+      color: var(--accent-light);
+    }
+    .chain-sep {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
     /* ── Consecutive agent flow ── */
     .bubble-row.agent.continuation .avatar {
       visibility: hidden;
@@ -289,6 +401,7 @@
   <header>
     <h1>loopForge Agent Tester</h1>
     <span class="badge">SSE Stream</span>
+    <span class="badge" id="modeBadge">Single Agent</span>
   </header>
 
   <div class="container">
@@ -298,6 +411,18 @@
         <span class="arrow">▼</span>
       </div>
       <div class="config-body">
+        <!-- mode selector -->
+        <div class="mode-selector">
+          <div class="mode-btn active" id="modeSingle" onclick="setMode('single')">
+            <div>Single Agent</div>
+            <div class="mode-desc">单 Agent + 四则运算工具</div>
+          </div>
+          <div class="mode-btn" id="modeTransfer" onclick="setMode('transfer')">
+            <div>Transfer (Handoff)</div>
+            <div class="mode-desc">triage → math_expert / writer</div>
+          </div>
+        </div>
+
         <div class="config-grid">
           <div class="field">
             <label>API Key *</label>
@@ -314,8 +439,8 @@
             <input id="cfgBaseURL" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3" />
             <div class="hint">留空使用默认地址</div>
           </div>
-          <div class="field full-width">
-            <label>System Prompt</label>
+          <div class="field full-width" id="systemPromptField">
+            <label>System Prompt <span style="font-weight:400;color:var(--text-dim)">(仅 Single 模式)</span></label>
             <textarea id="cfgSystemPrompt" placeholder="留空使用默认 system prompt (计算器助手)"></textarea>
           </div>
         </div>
@@ -340,7 +465,14 @@
     const sendBtn = document.getElementById('sendBtn');
 
     let currentAnswerBubble = null;
+    let currentAgentName = null;
     let lastSenderIsAgent = false;
+    let currentMode = 'single';
+
+    const defaultMessages = {
+      single: '请按以下步骤计算，每步必须调用对应的工具：1. 用 add 计算 17 + 28  2. 用 multiply 将结果乘以 3  3. 用 subtract 将结果减去 10',
+      transfer: '帮我算一下 (15 + 27) * 3 - 10 的结果，每步都要用工具计算。'
+    };
 
     const STORAGE_KEY = 'loopforge-config';
     function loadSavedConfig() {
@@ -350,6 +482,7 @@
         if (saved.model) document.getElementById('cfgModel').value = saved.model;
         if (saved.base_url) document.getElementById('cfgBaseURL').value = saved.base_url;
         if (saved.system_prompt) document.getElementById('cfgSystemPrompt').value = saved.system_prompt;
+        if (saved.mode) setMode(saved.mode);
       } catch {}
     }
     function saveConfig() { localStorage.setItem(STORAGE_KEY, JSON.stringify(getConfig())); }
@@ -359,9 +492,24 @@
         model: document.getElementById('cfgModel').value.trim(),
         base_url: document.getElementById('cfgBaseURL').value.trim(),
         system_prompt: document.getElementById('cfgSystemPrompt').value.trim(),
+        mode: currentMode,
       };
     }
     loadSavedConfig();
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('modeSingle').classList.toggle('active', mode === 'single');
+      document.getElementById('modeTransfer').classList.toggle('active', mode === 'transfer');
+      document.getElementById('modeBadge').textContent = mode === 'transfer' ? 'Transfer Mode' : 'Single Agent';
+      document.getElementById('systemPromptField').style.display = mode === 'transfer' ? 'none' : 'block';
+
+      if (!messageInput.dataset.userEdited) {
+        messageInput.value = defaultMessages[mode] || defaultMessages.single;
+      }
+    }
+
+    messageInput.addEventListener('input', () => { messageInput.dataset.userEdited = 'true'; });
 
     function toggleConfig() { document.getElementById('configPanel').classList.toggle('open'); }
 
@@ -375,16 +523,20 @@
       row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div><div class="avatar">U</div>`;
       chatArea.appendChild(row);
       lastSenderIsAgent = false;
+      currentAgentName = null;
       scroll();
     }
 
-    function ensureAgentBubble() {
-      if (currentAnswerBubble) return;
+    function ensureAgentBubble(agentName) {
+      if (currentAnswerBubble && currentAgentName === agentName) return;
+      sealAgentBubble();
       const row = document.createElement('div');
       row.className = 'bubble-row agent' + (lastSenderIsAgent ? ' continuation' : '');
-      row.innerHTML = `<div class="avatar">A</div><div class="bubble streaming"></div>`;
+      const label = agentName ? `<div class="agent-label">${escapeHtml(agentName)}</div>` : '';
+      row.innerHTML = `<div class="avatar">A</div><div class="bubble streaming">${label}</div>`;
       chatArea.appendChild(row);
       currentAnswerBubble = row.querySelector('.bubble');
+      currentAgentName = agentName;
       lastSenderIsAgent = true;
       scroll();
     }
@@ -409,6 +561,24 @@
       scroll();
     }
 
+    function addTransferBanner(from, to, reason) {
+      sealAgentBubble();
+      const el = document.createElement('div');
+      el.className = 'transfer-banner';
+      el.innerHTML = `
+        <div class="transfer-arrow">
+          <span class="from">${escapeHtml(from)}</span>
+          <span class="arrow-icon">→</span>
+          <span class="to">${escapeHtml(to)}</span>
+        </div>
+        ${reason ? `<span class="transfer-reason">${escapeHtml(reason)}</span>` : ''}
+      `;
+      chatArea.appendChild(el);
+      lastSenderIsAgent = false;
+      currentAgentName = to;
+      scroll();
+    }
+
     function scroll() { chatArea.scrollTop = chatArea.scrollHeight; }
 
     function sendMessage() {
@@ -421,9 +591,11 @@
       emptyState?.remove();
       sealAgentBubble();
       addUserBubble(message);
+      currentAgentName = null;
 
       sendBtn.disabled = true;
       messageInput.value = '';
+      messageInput.dataset.userEdited = '';
 
       fetch('/api/chat', {
         method: 'POST',
@@ -476,7 +648,7 @@
           break;
 
         case 'answer':
-          ensureAgentBubble();
+          ensureAgentBubble(currentAgentName);
           currentAnswerBubble.textContent += (data.delta || '');
           scroll();
           break;
@@ -486,12 +658,13 @@
           addSysInfo('llm', 'LLM', escapeHtml(data.model || ''));
           break;
 
-        case 'call_llm_end':
+        case 'call_llm_end': {
           sealAgentBubble();
           const fr = data.finish_reason || '';
           addSysInfo('llm', fr === 'tool_calls' ? 'LLM → TOOLS' : 'LLM END',
             `${data.input_tokens || 0} in / ${data.output_tokens || 0} out`);
           break;
+        }
 
         case 'tool_call_start':
           sealAgentBubble();
@@ -504,10 +677,14 @@
             escapeHtml(data.output || ''));
           break;
 
-        case 'agent_transfer':
+        case 'agent_transfer': {
           sealAgentBubble();
-          addSysInfo('transfer', 'TRANSFER', `${data.phase || ''} ${data.child_run_id || ''}`);
+          const from = data.from_agent || '';
+          const to = data.to_agent || '';
+          const reason = data.reason || '';
+          addTransferBanner(from, to, reason);
           break;
+        }
 
         case 'error':
           sealAgentBubble();
@@ -526,6 +703,19 @@
             detail += ` · tokens: ${inTok} in / ${outTok} out / ${totalTok} total`;
           }
           addSysInfo('done', 'DONE', detail);
+
+          const chain = oc.TransferChain || oc.transfer_chain || [];
+          if (chain.length > 1) {
+            const el = document.createElement('div');
+            el.className = 'sys-info sys-done continuation';
+            el.innerHTML = `<span class="sys-tag done">CHAIN</span><div class="chain-bar">${
+              chain.map((n, i) =>
+                `<span class="chain-node">${escapeHtml(n)}</span>${i < chain.length - 1 ? '<span class="chain-sep">→</span>' : ''}`
+              ).join('')
+            }</div>`;
+            chatArea.appendChild(el);
+            scroll();
+          }
           break;
         }
 

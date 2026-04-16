@@ -133,7 +133,10 @@ const (
 
 type AgentTransferPayload struct {
 	Phase      TransferPhase `json:"phase"`
-	ChildRunID string        `json:"child_run_id"`
+	FromAgent  string        `json:"from_agent"`
+	ToAgent    string        `json:"to_agent"`
+	Reason     string        `json:"reason,omitempty"`
+	ChildRunID string        `json:"child_run_id,omitempty"`
 	Depth      int           `json:"depth,omitempty"`
 	OK         bool          `json:"ok,omitempty"`
 }

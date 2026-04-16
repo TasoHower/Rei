@@ -1,92 +1,104 @@
 # Rei
 
+Rei 是一个由多个子项目组成的 AI Agent 基础设施，包含 Multi-Agent 运行时引擎、Self-RAG MCP 服务以及调试用测试服务器。所有组件均使用 Go 语言实现。
 
-
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+## 项目结构
 
 ```
-cd existing_repo
-git remote add origin http://git.100credit.cn/haowen.cao/rei.git
-git branch -M main
-git push -uf origin main
+Rei/
+├── loopForge/      # Multi-Agent 运行时引擎
+├── SeRagLF/        # Self-RAG MCP Server
+└── test-server/    # Agent 调试测试服务器
 ```
 
-## Integrate with your tools
+## loopForge
 
-- [ ] [Set up project integrations](http://git.100credit.cn/haowen.cao/rei/-/settings/integrations)
+Multi-Agent 运行时引擎，基于 `agent-sdk-go` 构建，提供可控的 Agent 循环、工具调用、MCP 集成、Skills 注入和动态 spawn 能力。
 
-## Collaborate with your team
+**核心特性：**
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+- **Agent Loop**：单 Agent 迭代运行，支持 LLM 调用与工具执行的交替循环
+- **Multi-Agent**：静态 Network（Parallel / Sequential / Competitive）+ 动态 spawn（受深度、并发、预算约束）
+- **MCP 集成**：多 Server 管理、工具白名单与前缀隔离
+- **Skills**：`SKILL.md` 解析与受信加载
+- **可观测性**：OTel trace + metrics、token/cost 聚合
 
-## Test and Deploy
+```bash
+cd loopForge
+go run cmd/loopforged/main.go
+```
 
-Use the built-in continuous integration in GitLab.
+## SeRagLF
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+生产级 Self-RAG MCP Server，将自反思检索增强生成能力封装为标准 MCP 服务。基于 Eino `compose.Graph` 实现有向循环图编排，支持检索→评估→生成→幻觉检测→质量评估的完整反思闭环。
 
-***
+**核心特性：**
 
-# Editing this README
+- **Self-RAG 引擎**：6 节点 + 3 条件边的有向循环图，支持自动查询重写与多轮重试
+- **双层记忆系统**：短期蒸馏上下文（Redis）+ 长期用户画像（MySQL + Qdrant）
+- **12 个 MCP Tools**：6 个 RAG 工具 + 6 个 Memory 工具
+- **文档摄入**：支持 txt/md/html 解析与 Unicode 级文本分块
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
+**依赖服务：** Qdrant、MySQL 8.4、Redis 7
 
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```bash
+cd SeRagLF
+docker compose up mysql qdrant redis -d
+make run
+```
 
-## Name
-Choose a self-explaining name for your project.
+## test-server
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+基于 Hertz 的 Agent 调试服务器，提供 Web UI 和 SSE 流式接口，用于测试 loopForge 引擎的 Agent 运行效果。内置四则运算工具，使用豆包（Doubao）作为 LLM Provider。
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```bash
+cd test-server
+./start.sh
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## 愿景
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Rei 的目标是构建一套**完整的 Go 原生 AI Agent 基础设施**——从底层的检索增强生成，到上层的多智能体协作，再到端到端的可观测与调试体验，形成闭环。
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### 近期里程碑
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+**loopForge — 从可运行到可协作：**
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+- **Multi-Agent spawn**：父子 Run 递归调用，支持动态创建子 Agent 并回注结果，MaxDepth / 并发 / 预算硬限制
+- **MCP 客户端**：stdio / Streamable HTTP transport，tools/list 自动发现与注册，实现 loopForge ↔ SeRagLF 端到端联调
+- **Skill 注册表**：`SKILL.md` 指令注入 + MCP 能力发现统一注册，支持动态启停与审计
+- **工具权限收敛**：per-agent / per-spawn 的 whitelist / blacklist
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+**SeRagLF — 从功能完备到生产就绪：**
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+- LLM API 实际联调（OpenAI / 豆包 Ark）
+- Redis Embedding 缓存，减少重复向量化请求
+- 集成测试（testcontainers: MySQL + Redis + Qdrant）
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### 中期方向
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- **Self-RAG Planner**：模型自主决策是否检索，通过 MCP retrieve tool 实现 RAG-in-the-loop
+- **Reflection / Retry**：工具调用失败后模型自反思并重试
+- **Cost Tracing**：从模型 adapter 层采集 usage，沿 Run 树聚合到 RunMetrics
+- **Dev UI**：进程内 HTTP Debug Server + 浏览器可视化面板，展示 Run 时间线、spawn 树、tool 调用与 token/cost 聚合
 
-## License
-For open source projects, say how it is licensed.
+### 长期愿景
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- **统一编排范式**：Agent Loop（loopForge）与 Graph 编排（SeRagLF/Eino）互补共存，各司其职
+- **生产级多智能体**：静态 Network + 动态 spawn 支撑复杂业务流程的可控拆解与协作
+- **即插即用的能力层**：任何领域能力（RAG、记忆、代码执行、浏览器操作等）通过 MCP 工具标准化接入，引擎与能力彻底解耦
+- **全链路可观测**：OTel trace 贯穿父子 Run、跨 MCP 调用与 tool 执行，配合 Dev UI 实现从开发调试到生产监控的统一体验
+
+## 技术栈
+
+| 组件 | 技术 |
+|------|------|
+| 语言 | Go |
+| Agent 引擎 | agent-sdk-go |
+| RAG 编排 | Eino compose.Graph (CloudWeGo) |
+| MCP 协议 | MCP Go SDK |
+| 向量数据库 | Qdrant (gRPC) |
+| 关系数据库 | MySQL 8.4 |
+| 缓存 | Redis 7 |
+| HTTP 框架 | Hertz (CloudWeGo) |
+| LLM Provider | OpenAI / Doubao (Ark) |

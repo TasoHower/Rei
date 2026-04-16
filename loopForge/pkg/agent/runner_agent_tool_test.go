@@ -53,6 +53,32 @@ func (mockToolLoopChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCallin
 
 var _ modeliface.ToolCallingChatModel = mockToolLoopChatModel{}
 
+// mockFinalChatModel always returns a plain text response (no tool calls).
+type mockFinalChatModel struct {
+	text string
+}
+
+func (m mockFinalChatModel) Stream(ctx context.Context, input []*types.Message, opts ...types.CallOption) (types.MessageStreamReader, error) {
+	msg, err := m.Generate(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return types.NewSliceStreamReader([]*types.Message{msg}), nil
+}
+
+func (m mockFinalChatModel) Generate(_ context.Context, _ []*types.Message, _ ...types.CallOption) (*types.Message, error) {
+	return &types.Message{
+		Role:    types.RoleAssistant,
+		Content: m.text,
+	}, nil
+}
+
+func (m mockFinalChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+var _ modeliface.ToolCallingChatModel = mockFinalChatModel{}
+
 // collectEvents drains the event channel and returns all events.
 func collectEvents(ch <-chan *event.RuntimeEvent) []*event.RuntimeEvent {
 	var events []*event.RuntimeEvent
@@ -142,5 +168,31 @@ func TestRunnerAgent_toolLoop_invokesHandle(t *testing.T) {
 	}
 	if !sawToolEnd {
 		t.Fatal("expected EventToolCallEnd in stream")
+	}
+}
+
+func TestRunnerAgent_toolLoop_noTransferRegression(t *testing.T) {
+	ctx := context.Background()
+	a := NewRunnerAgent(mockFinalChatModel{text: "standalone response"},
+		WithMaxSteps(4),
+	)
+	ch := a.Run(ctx, &request.RuntimeRequest{
+		SessionID:   "test-standalone",
+		UserMessage: "hello",
+	})
+	events := collectEvents(ch)
+
+	qe := findQueryEnd(events)
+	if qe == nil || qe.Outcome == nil {
+		t.Fatal("missing QueryEndPayload")
+	}
+	if qe.Outcome.Termination != outcome.TerminationCompleted {
+		t.Fatalf("termination=%q", qe.Outcome.Termination)
+	}
+	if qe.Outcome.FinalText != "standalone response" {
+		t.Fatalf("FinalText=%q", qe.Outcome.FinalText)
+	}
+	if len(qe.Outcome.TransferChain) != 0 {
+		t.Fatalf("TransferChain should be empty, got %v", qe.Outcome.TransferChain)
 	}
 }
