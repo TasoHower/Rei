@@ -1,20 +1,19 @@
-package transfer
+package agent
 
 import (
 	"encoding/json"
 	"fmt"
 	"strings"
 
-	"loopforge/pkg/agent"
 	"loopforge/pkg/model"
 )
 
-const toolPrefix = "transfer_to_"
+const transferToolPrefix = "transfer_to_"
 
-// BuildTools generates one ToolInfo per handoff target registered on current.
-// These tools carry no Handle — the Orchestrator intercepts them via
-// agent.ToolInterceptor as control-flow signals.
-func BuildTools(current *agent.RunnerAgent) []*model.ToolInfo {
+// buildTransferTools generates one ToolInfo per handoff target registered on
+// current. These tools carry no Handle — the Runner intercepts them via
+// ToolInterceptor as control-flow signals.
+func buildTransferTools(current *RunnerAgent) []*model.ToolInfo {
 	targets := current.Handoffs()
 	if len(targets) == 0 {
 		return nil
@@ -31,7 +30,7 @@ func BuildTools(current *agent.RunnerAgent) []*model.ToolInfo {
 		}
 
 		tools = append(tools, &model.ToolInfo{
-			Name:        toolPrefix + t.Name,
+			Name:        transferToolPrefix + t.Name,
 			Description: fmt.Sprintf("Transfer the conversation to the %q agent. %s", t.Name, desc),
 			Parameters: map[string]interface{}{
 				"type": "object",
@@ -48,9 +47,9 @@ func BuildTools(current *agent.RunnerAgent) []*model.ToolInfo {
 	return tools
 }
 
-// BuildTransferPrompt generates a system prompt segment describing the
+// buildTransferPrompt generates a system prompt segment describing the
 // available transfer targets. Returns "" if there are no handoffs.
-func BuildTransferPrompt(current *agent.RunnerAgent) string {
+func buildTransferPrompt(current *RunnerAgent) string {
 	targets := current.Handoffs()
 	if len(targets) == 0 {
 		return ""
@@ -70,24 +69,23 @@ func BuildTransferPrompt(current *agent.RunnerAgent) string {
 		if len(desc) > 120 {
 			desc = desc[:120] + "..."
 		}
-		fmt.Fprintf(&b, "- `%s%s` — %s\n", toolPrefix, t.Name, desc)
+		fmt.Fprintf(&b, "- `%s%s` — %s\n", transferToolPrefix, t.Name, desc)
 	}
 	return b.String()
 }
 
-// IsTransferTool returns true if the tool call targets a transfer_to_{name}
-// tool. It satisfies agent.ToolInterceptor and can be assigned directly.
-func IsTransferTool(tc model.ToolCallPart) bool {
-	return strings.HasPrefix(tc.Name, toolPrefix)
+// isTransferTool returns true if the tool call targets a transfer_to_{name} tool.
+func isTransferTool(tc model.ToolCallPart) bool {
+	return strings.HasPrefix(tc.Name, transferToolPrefix)
 }
 
-// TargetAgent extracts the destination agent name from a transfer tool name.
-func TargetAgent(toolName string) string {
-	return strings.TrimPrefix(toolName, toolPrefix)
+// targetAgent extracts the destination agent name from a transfer tool name.
+func targetAgent(toolName string) string {
+	return strings.TrimPrefix(toolName, transferToolPrefix)
 }
 
-// ExtractReason parses the "reason" field from the tool call arguments JSON.
-func ExtractReason(argsJSON string) string {
+// extractReason parses the "reason" field from the tool call arguments JSON.
+func extractReason(argsJSON string) string {
 	var args struct {
 		Reason string `json:"reason"`
 	}

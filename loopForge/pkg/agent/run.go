@@ -1,10 +1,9 @@
-package transfer
+package agent
 
 import (
 	"context"
 	"fmt"
 
-	"loopforge/pkg/agent"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
@@ -13,45 +12,65 @@ import (
 
 const defaultMaxTransfers = 10
 
-// Orchestrator manages multi-agent transfer (handoff) loops.
-// It satisfies the agent.Agent interface, so callers see the same streaming
-// channel regardless of how many agents participate in handling a request.
-type Orchestrator struct {
-	EntryAgent   *agent.RunnerAgent
-	MaxTransfers int
+// Runner is the top-level execution entry point for an agent graph. It manages
+// the runtime lifecycle including transfer orchestration, metrics tracking, and
+// concurrency isolation (per-run Clone of agent templates).
+//
+// For single-agent use without transfers, Runner works identically to calling
+// RunnerAgent.Run directly.
+type Runner struct {
+	entryAgent   *RunnerAgent
+	maxTransfers int
 }
 
-var _ agent.Agent = (*Orchestrator)(nil)
+var _ Agent = (*Runner)(nil)
 
-// NewOrchestrator creates an Orchestrator that starts with entryAgent and
-// may transfer up to MaxTransfers times across the agents reachable via
-// RunnerAgent.Handoffs().
-func NewOrchestrator(entryAgent *agent.RunnerAgent, opts ...OrchestratorOption) *Orchestrator {
-	o := &Orchestrator{
-		EntryAgent:   entryAgent,
-		MaxTransfers: defaultMaxTransfers,
+// RunOption configures a Runner when passed to NewRunner.
+type RunOption func(*Runner)
+
+// NewRunner creates a Runner that starts execution from entryAgent.
+func NewRunner(entryAgent *RunnerAgent, opts ...RunOption) *Runner {
+	r := &Runner{
+		entryAgent:   entryAgent,
+		maxTransfers: defaultMaxTransfers,
 	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(o)
+	for _, o := range opts {
+		if o != nil {
+			o(r)
 		}
 	}
-	return o
+	return r
 }
 
-// Run starts the orchestration loop in a goroutine and returns a unified event channel.
-func (o *Orchestrator) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *event.RuntimeEvent {
+// WithMaxTransfers sets the maximum number of agent-to-agent transfers allowed
+// in a single run. Prevents infinite handoff loops. Default is 10.
+func WithMaxTransfers(n int) RunOption {
+	return func(r *Runner) {
+		if n > 0 {
+			r.maxTransfers = n
+		}
+	}
+}
+
+// Run starts the agent graph in a goroutine and returns a channel that streams
+// RuntimeEvents. If the entry agent has handoff targets, the runner
+// automatically manages the transfer loop; otherwise it runs the single agent.
+func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *event.RuntimeEvent {
 	ch := make(chan *event.RuntimeEvent, 8)
 
 	go func() {
 		defer close(ch)
-		o.orchestrate(ctx, req, ch)
+		if len(r.entryAgent.Handoffs()) > 0 {
+			r.runTransferLoop(ctx, req, ch)
+		} else {
+			r.entryAgent.RunLoop(ctx, req, ch, nil, nil)
+		}
 	}()
 
 	return ch
 }
 
-func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequest, ch chan<- *event.RuntimeEvent) {
+func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeRequest, ch chan<- *event.RuntimeEvent) {
 	runID := runIDFrom(req)
 
 	emit := func(step int, payload event.EventPayload) {
@@ -69,12 +88,12 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 		}})
 	}
 
-	if o.EntryAgent == nil {
-		emitError("invalid_config", "Orchestrator.EntryAgent is nil")
+	if r.entryAgent == nil {
+		emitError("invalid_config", "Runner.entryAgent is nil")
 		return
 	}
 
-	current := o.EntryAgent
+	current := r.entryAgent
 	var inheritedMsgs []*model.Message
 	accumulated := outcome.RunMetrics{}
 	var transferChain []string
@@ -83,13 +102,13 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 
 	for {
 		runner := current.Clone()
-		runner.ExtraTools = BuildTools(current)
-		runner.ToolInterceptor = IsTransferTool
-		if p := BuildTransferPrompt(current); p != "" {
+		runner.ExtraTools = buildTransferTools(current)
+		runner.ToolInterceptor = isTransferTool
+		if p := buildTransferPrompt(current); p != "" {
 			runner.SystemInstructions += p
 		}
 
-		st := &agent.LoopState{
+		st := &LoopState{
 			AccumulatedMetrics: accumulated,
 			TransferChain:      transferChain,
 			SuppressBookends:   !firstAgent,
@@ -102,7 +121,7 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 		}
 
 		transferCount++
-		if transferCount > o.MaxTransfers {
+		if transferCount > r.maxTransfers {
 			emitError("max_transfers", "exceeded maximum transfer count")
 			return
 		}
@@ -115,8 +134,8 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 			accumulated.Model = result.Metrics.Model
 		}
 
-		target := TargetAgent(result.ToolCall.Name)
-		reason := ExtractReason(result.ToolCall.Arguments)
+		target := targetAgent(result.ToolCall.Name)
+		reason := extractReason(result.ToolCall.Arguments)
 
 		next := findHandoff(current, target)
 		if next == nil {
@@ -144,19 +163,11 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 	}
 }
 
-// findHandoff looks up a target agent by Name in a's handoff list.
-func findHandoff(a *agent.RunnerAgent, name string) *agent.RunnerAgent {
+func findHandoff(a *RunnerAgent, name string) *RunnerAgent {
 	for _, h := range a.Handoffs() {
 		if h.Name == name {
 			return h
 		}
 	}
 	return nil
-}
-
-func runIDFrom(req *request.RuntimeRequest) string {
-	if req.SessionID != "" {
-		return req.SessionID
-	}
-	return "run"
 }

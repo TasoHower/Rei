@@ -318,3 +318,4 @@ EventAgentTransfer{from, to, reason}           EventAgentTransfer{from, to, reas
 | 2026-04-16 | 方案迭代：去掉 FinishTransfer（FinishReason 是 LLM 行为描述，不应混入引擎控制流）；保留 pkg/transfer 包（编排层与 Agent 运行循环职责分离）；去掉 Registry（Agent 通过 AddHandoff 直接引用目标，无需字符串查找）。 |
 | 2026-04-16 | **代码交付完成**。全部 5 步执行完毕，`go build ./...` + `go test ./... -race` 通过。 |
 | 2026-04-16 | 补充：Orchestrator 为有 handoff 目标的 agent 自动注入 transfer 引导 prompt（`BuildTransferPrompt`）。 |
+| 2026-04-16 | 新增 Runner（`pkg/agent/run.go`）作为顶层运行时入口，删除 `pkg/transfer` 整个目录。编排逻辑、transfer 工具构建全部内聚至 `pkg/agent`。API 简化为 `agent.NewRunner(entry, agent.WithMaxTransfers(5))`。 |

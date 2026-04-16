@@ -53,51 +53,6 @@ func (mockToolLoopChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCallin
 
 var _ modeliface.ToolCallingChatModel = mockToolLoopChatModel{}
 
-// mockFinalChatModel always returns a plain text response (no tool calls).
-type mockFinalChatModel struct {
-	text string
-}
-
-func (m mockFinalChatModel) Stream(ctx context.Context, input []*types.Message, opts ...types.CallOption) (types.MessageStreamReader, error) {
-	msg, err := m.Generate(ctx, input, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return types.NewSliceStreamReader([]*types.Message{msg}), nil
-}
-
-func (m mockFinalChatModel) Generate(_ context.Context, _ []*types.Message, _ ...types.CallOption) (*types.Message, error) {
-	return &types.Message{
-		Role:    types.RoleAssistant,
-		Content: m.text,
-	}, nil
-}
-
-func (m mockFinalChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCallingChatModel, error) {
-	return m, nil
-}
-
-var _ modeliface.ToolCallingChatModel = mockFinalChatModel{}
-
-// collectEvents drains the event channel and returns all events.
-func collectEvents(ch <-chan *event.RuntimeEvent) []*event.RuntimeEvent {
-	var events []*event.RuntimeEvent
-	for ev := range ch {
-		events = append(events, ev)
-	}
-	return events
-}
-
-// findQueryEnd returns the QueryEndPayload from the event stream, or nil if none.
-func findQueryEnd(events []*event.RuntimeEvent) *event.QueryEndPayload {
-	for i := len(events) - 1; i >= 0; i-- {
-		if qe := events[i].QueryEnd(); qe != nil {
-			return qe
-		}
-	}
-	return nil
-}
-
 func TestRunnerAgent_toolLoop_invokesHandle(t *testing.T) {
 	ctx := context.Background()
 	var invoked bool

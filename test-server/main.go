@@ -17,7 +17,6 @@ import (
 	arkdoubao "loopforge/pkg/model/adapters/doubao"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
-	"loopforge/pkg/transfer"
 )
 
 const (
@@ -200,7 +199,7 @@ Be creative and thoughtful in your writing.`),
 	triage.AddHandoff(mathExpert, writer)
 	mathExpert.AddHandoff(triage)
 
-	return transfer.NewOrchestrator(triage, transfer.WithMaxTransfers(5))
+	return agent.NewRunner(triage, agent.WithMaxTransfers(5))
 }
 
 // --- handler ---

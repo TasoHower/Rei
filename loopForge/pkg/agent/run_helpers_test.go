@@ -1,4 +1,4 @@
-package transfer
+package agent
 
 import (
 	"context"
@@ -27,7 +27,7 @@ func (m mockTransferChatModel) Generate(_ context.Context, _ []*types.Message, _
 		Content: "",
 		ToolCalls: []types.ToolCallPart{{
 			ID:        "call_transfer_1",
-			Name:      toolPrefix + m.target,
+			Name:      transferToolPrefix + m.target,
 			Arguments: `{"reason":"user needs math help"}`,
 		}},
 	}, nil

@@ -2,8 +2,8 @@
 // (Agent, Planner) and the default concrete Agent: RunnerAgent — a pkg/model chat loop with
 // function calling. Tool execution helpers live in loopforge/pkg/tool.
 //
-// Transfer (handoff): RunnerAgent supports multi-agent transfer natively. Call
-// AddHandoff to register allowed handoff targets; the Orchestrator in
-// loopforge/pkg/transfer reads these via Handoffs() and injects transfer tools
-// at runtime. Clone() creates per-run copies for concurrency isolation.
+// Runner is the top-level execution entry point. Create a Runner via NewRunner
+// with an entry RunnerAgent. If the entry agent has handoff targets (registered
+// via AddHandoff), the Runner automatically manages the transfer loop with
+// per-run Clone for concurrency isolation.
 package agent

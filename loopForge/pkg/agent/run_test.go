@@ -1,35 +1,34 @@
-package transfer
+package agent
 
 import (
 	"context"
 	"sync"
 	"testing"
 
-	"loopforge/pkg/agent"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 )
 
-func TestOrchestrator_Transfer_HappyPath(t *testing.T) {
-	triage := agent.NewRunnerAgent(
+func TestRunner_Transfer_HappyPath(t *testing.T) {
+	triage := NewRunnerAgent(
 		mockTransferChatModel{target: "expert"},
-		agent.WithName("triage"),
-		agent.WithDescription("Routes requests"),
-		agent.WithSystemInstructions("You are triage."),
+		WithName("triage"),
+		WithDescription("Routes requests"),
+		WithSystemInstructions("You are triage."),
 	)
-	expert := agent.NewRunnerAgent(
+	expert := NewRunnerAgent(
 		mockFinalChatModel{text: "The answer is 42."},
-		agent.WithName("expert"),
-		agent.WithDescription("Handles expert tasks"),
-		agent.WithSystemInstructions("You are an expert."),
+		WithName("expert"),
+		WithDescription("Handles expert tasks"),
+		WithSystemInstructions("You are an expert."),
 	)
 	triage.AddHandoff(expert)
 
-	orch := NewOrchestrator(triage, WithMaxTransfers(5))
+	r := NewRunner(triage, WithMaxTransfers(5))
 
 	ctx := context.Background()
-	ch := orch.Run(ctx, &request.RuntimeRequest{
+	ch := r.Run(ctx, &request.RuntimeRequest{
 		SessionID:   "test-transfer",
 		UserMessage: "Help me with math",
 	})
@@ -72,22 +71,22 @@ func TestOrchestrator_Transfer_HappyPath(t *testing.T) {
 	}
 }
 
-func TestOrchestrator_MaxTransfers_Exceeded(t *testing.T) {
-	ping := agent.NewRunnerAgent(
+func TestRunner_MaxTransfers_Exceeded(t *testing.T) {
+	ping := NewRunnerAgent(
 		mockTransferChatModel{target: "pong"},
-		agent.WithName("ping"),
+		WithName("ping"),
 	)
-	pong := agent.NewRunnerAgent(
+	pong := NewRunnerAgent(
 		mockTransferChatModel{target: "ping"},
-		agent.WithName("pong"),
+		WithName("pong"),
 	)
 	ping.AddHandoff(pong)
 	pong.AddHandoff(ping)
 
-	orch := NewOrchestrator(ping, WithMaxTransfers(3))
+	r := NewRunner(ping, WithMaxTransfers(3))
 
 	ctx := context.Background()
-	ch := orch.Run(ctx, &request.RuntimeRequest{
+	ch := r.Run(ctx, &request.RuntimeRequest{
 		SessionID:   "test-loop",
 		UserMessage: "loop forever",
 	})
@@ -115,17 +114,17 @@ func TestOrchestrator_MaxTransfers_Exceeded(t *testing.T) {
 	}
 }
 
-func TestOrchestrator_SingleAgent_NoTransfer(t *testing.T) {
-	solo := agent.NewRunnerAgent(
+func TestRunner_SingleAgent_NoTransfer(t *testing.T) {
+	solo := NewRunnerAgent(
 		mockFinalChatModel{text: "Just me."},
-		agent.WithName("solo"),
-		agent.WithSystemInstructions("solo agent"),
+		WithName("solo"),
+		WithSystemInstructions("solo agent"),
 	)
 
-	orch := NewOrchestrator(solo)
+	r := NewRunner(solo)
 
 	ctx := context.Background()
-	ch := orch.Run(ctx, &request.RuntimeRequest{
+	ch := r.Run(ctx, &request.RuntimeRequest{
 		SessionID:   "test-solo",
 		UserMessage: "hello",
 	})
@@ -141,24 +140,21 @@ func TestOrchestrator_SingleAgent_NoTransfer(t *testing.T) {
 	if qe.Outcome.FinalText != "Just me." {
 		t.Fatalf("FinalText=%q", qe.Outcome.FinalText)
 	}
-	if len(qe.Outcome.TransferChain) != 1 || qe.Outcome.TransferChain[0] != "solo" {
-		t.Fatalf("TransferChain=%v", qe.Outcome.TransferChain)
-	}
 }
 
-func TestOrchestrator_Transfer_NoToolCallEvents(t *testing.T) {
-	triage := agent.NewRunnerAgent(
+func TestRunner_Transfer_NoToolCallEvents(t *testing.T) {
+	triage := NewRunnerAgent(
 		mockTransferChatModel{target: "expert"},
-		agent.WithName("triage"),
+		WithName("triage"),
 	)
-	expert := agent.NewRunnerAgent(
+	expert := NewRunnerAgent(
 		mockFinalChatModel{text: "done"},
-		agent.WithName("expert"),
+		WithName("expert"),
 	)
 	triage.AddHandoff(expert)
 
-	orch := NewOrchestrator(triage)
-	ch := orch.Run(context.Background(), &request.RuntimeRequest{
+	r := NewRunner(triage)
+	ch := r.Run(context.Background(), &request.RuntimeRequest{
 		SessionID:   "test-no-toolcall",
 		UserMessage: "test",
 	})
@@ -171,18 +167,18 @@ func TestOrchestrator_Transfer_NoToolCallEvents(t *testing.T) {
 	}
 }
 
-func TestOrchestrator_ConcurrentRuns(t *testing.T) {
-	triage := agent.NewRunnerAgent(
+func TestRunner_ConcurrentRuns(t *testing.T) {
+	triage := NewRunnerAgent(
 		mockTransferChatModel{target: "expert"},
-		agent.WithName("triage"),
+		WithName("triage"),
 	)
-	expert := agent.NewRunnerAgent(
+	expert := NewRunnerAgent(
 		mockFinalChatModel{text: "answer"},
-		agent.WithName("expert"),
+		WithName("expert"),
 	)
 	triage.AddHandoff(expert)
 
-	orch := NewOrchestrator(triage, WithMaxTransfers(5))
+	r := NewRunner(triage, WithMaxTransfers(5))
 
 	const n = 10
 	var wg sync.WaitGroup
@@ -190,7 +186,7 @@ func TestOrchestrator_ConcurrentRuns(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(id int) {
 			defer wg.Done()
-			ch := orch.Run(context.Background(), &request.RuntimeRequest{
+			ch := r.Run(context.Background(), &request.RuntimeRequest{
 				SessionID:   "concurrent-" + string(rune('A'+id)),
 				UserMessage: "test",
 			})

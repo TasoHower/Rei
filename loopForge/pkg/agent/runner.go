@@ -41,8 +41,8 @@ type LoopState struct {
 // fallback (see loopforge/pkg/tool).
 //
 // Transfer (handoff): call AddHandoff to register other RunnerAgent instances
-// as allowed transfer targets. The Orchestrator in pkg/transfer reads these
-// via Handoffs() and injects the corresponding transfer tools at runtime.
+// as allowed transfer targets. Use Runner (NewRunner) to execute the agent
+// graph — it automatically handles the transfer loop and per-run cloning.
 type RunnerAgent struct {
 	Name               string
 	Description        string // human-readable summary; surfaced in transfer tool descriptions
@@ -71,7 +71,7 @@ type RunnerAgent struct {
 }
 
 // AddHandoff registers one or more agents as allowed transfer (handoff) targets.
-// The Orchestrator reads these at runtime to build transfer_to_{name} tools.
+// The Runner reads these at runtime to build transfer_to_{name} tools.
 func (a *RunnerAgent) AddHandoff(targets ...*RunnerAgent) {
 	a.handoffs = append(a.handoffs, targets...)
 }

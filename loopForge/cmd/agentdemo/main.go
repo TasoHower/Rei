@@ -27,7 +27,6 @@ import (
 	arkdoubao "loopforge/pkg/model/adapters/doubao"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
-	"loopforge/pkg/transfer"
 )
 
 const (
@@ -226,8 +225,8 @@ Be creative and thoughtful in your writing.`),
 	triage.AddHandoff(mathExpert, writer)
 	mathExpert.AddHandoff(triage)
 
-	orch := transfer.NewOrchestrator(triage, transfer.WithMaxTransfers(5))
-	streamAndPrint(ctx, orch, cfg)
+	r := agent.NewRunner(triage, agent.WithMaxTransfers(5))
+	streamAndPrint(ctx, r, cfg)
 }
 
 // --- shared event printer ---
