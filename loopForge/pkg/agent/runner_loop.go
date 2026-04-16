@@ -161,15 +161,13 @@ func (a *RunnerAgent) RunLoop(
 		}
 
 		// Check for intercepted tool calls (e.g. transfer).
+		// Intercepted calls are control-flow signals — no ToolCallStart/End
+		// events are emitted. The orchestrator emits its own event (e.g.
+		// AgentTransfer) to signal what happened.
 		if a.ToolInterceptor != nil {
 			for i := range sr.ToolCalls {
 				tc := sr.ToolCalls[i]
 				if a.ToolInterceptor(tc) {
-					emit(step, &event.ToolCallStartPayload{
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-						Arguments:  tc.Arguments,
-					})
 					return &InterceptedCall{
 						ToolCall: tc,
 						Msgs:     msgs,

@@ -17,18 +17,17 @@ const defaultMaxTransfers = 10
 // It satisfies the agent.Agent interface, so callers see the same streaming
 // channel regardless of how many agents participate in handling a request.
 type Orchestrator struct {
-	Registry     *Registry
-	EntryAgent   string
+	EntryAgent   *agent.RunnerAgent
 	MaxTransfers int
 }
 
 var _ agent.Agent = (*Orchestrator)(nil)
 
 // NewOrchestrator creates an Orchestrator that starts with entryAgent and
-// may transfer up to MaxTransfers times across the agents in registry.
-func NewOrchestrator(registry *Registry, entryAgent string, opts ...OrchestratorOption) *Orchestrator {
+// may transfer up to MaxTransfers times across the agents reachable via
+// RunnerAgent.Handoffs().
+func NewOrchestrator(entryAgent *agent.RunnerAgent, opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
-		Registry:     registry,
 		EntryAgent:   entryAgent,
 		MaxTransfers: defaultMaxTransfers,
 	}
@@ -70,12 +69,12 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 		}})
 	}
 
-	if o.Registry == nil {
-		emitError("invalid_config", "Orchestrator.Registry is nil")
+	if o.EntryAgent == nil {
+		emitError("invalid_config", "Orchestrator.EntryAgent is nil")
 		return
 	}
 
-	currentName := o.EntryAgent
+	current := o.EntryAgent
 	var inheritedMsgs []*model.Message
 	accumulated := outcome.RunMetrics{}
 	var transferChain []string
@@ -83,13 +82,12 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 	firstAgent := true
 
 	for {
-		cfg, ok := o.Registry.Get(currentName)
-		if !ok {
-			emitError("invalid_config", "agent "+currentName+" not found in registry")
-			return
+		runner := current.Clone()
+		runner.ExtraTools = BuildTools(current)
+		runner.ToolInterceptor = IsTransferTool
+		if p := BuildTransferPrompt(current); p != "" {
+			runner.SystemInstructions += p
 		}
-
-		runner := runnerFromConfig(cfg, o.Registry, currentName)
 
 		st := &agent.LoopState{
 			AccumulatedMetrics: accumulated,
@@ -103,14 +101,12 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 			return
 		}
 
-		// Transfer requested.
 		transferCount++
 		if transferCount > o.MaxTransfers {
 			emitError("max_transfers", "exceeded maximum transfer count")
 			return
 		}
 
-		// Accumulate metrics from the departing agent.
 		accumulated.InputTokens += result.Metrics.InputTokens
 		accumulated.OutputTokens += result.Metrics.OutputTokens
 		accumulated.TotalTokens += result.Metrics.TotalTokens
@@ -122,42 +118,40 @@ func (o *Orchestrator) orchestrate(ctx context.Context, req *request.RuntimeRequ
 		target := TargetAgent(result.ToolCall.Name)
 		reason := ExtractReason(result.ToolCall.Arguments)
 
-		transferChain = append(transferChain, currentName)
+		next := findHandoff(current, target)
+		if next == nil {
+			emitError("invalid_transfer", "target agent not found in handoffs: "+target)
+			return
+		}
+
+		transferChain = append(transferChain, current.Name)
 
 		emit(0, &event.AgentTransferPayload{
 			Phase:     event.TransferStart,
-			FromAgent: currentName,
+			FromAgent: current.Name,
 			ToAgent:   target,
 			Reason:    reason,
 		})
 
-		// Append a synthetic tool result to close the dangling tool call.
-		// Without this, the next agent sees an assistant message with a
-		// pending tool call but no result, which confuses most LLMs.
 		inheritedMsgs = append(result.Msgs, &model.Message{
 			Role:       model.RoleTool,
 			ToolCallID: result.ToolCall.ID,
 			Name:       result.ToolCall.Name,
 			Content:    fmt.Sprintf("Transfer accepted. The conversation is now handled by %s.", target),
 		})
-		currentName = target
+		current = next
 		firstAgent = false
 	}
 }
 
-func runnerFromConfig(cfg *AgentConfig, registry *Registry, currentName string) *agent.RunnerAgent {
-	return &agent.RunnerAgent{
-		Name:               cfg.Name,
-		ModelName:          cfg.ModelName,
-		SystemInstructions: cfg.SystemInstructions,
-		ChatModel:          cfg.ChatModel,
-		ToolInfos:          cfg.ToolInfos,
-		Executor:           cfg.Executor,
-		MaxSteps:           cfg.MaxSteps,
-		CallOptions:        cfg.CallOptions,
-		ExtraTools:         BuildTools(currentName, registry),
-		ToolInterceptor:    IsTransferTool,
+// findHandoff looks up a target agent by Name in a's handoff list.
+func findHandoff(a *agent.RunnerAgent, name string) *agent.RunnerAgent {
+	for _, h := range a.Handoffs() {
+		if h.Name == name {
+			return h
+		}
 	}
+	return nil
 }
 
 func runIDFrom(req *request.RuntimeRequest) string {

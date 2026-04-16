@@ -14,6 +14,11 @@ type BaseChatModel interface {
 }
 
 // ToolCallingChatModel extends BaseChatModel with immutable tool binding (compare: eino ToolCallingChatModel).
+//
+// Concurrency: implementations must be safe for concurrent use. Generate,
+// Stream, and WithTools may be called from multiple goroutines simultaneously
+// (e.g. when the Orchestrator runs the same agent graph for multiple sessions).
+// WithTools must return a new instance without mutating the receiver.
 type ToolCallingChatModel interface {
 	BaseChatModel
 

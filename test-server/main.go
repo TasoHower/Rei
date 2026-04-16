@@ -162,46 +162,45 @@ func buildSingleAgent(req *ChatRequest) agent.Agent {
 
 func buildTransferAgent(req *ChatRequest) agent.Agent {
 	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
-	registry := transfer.NewRegistry()
 
-	_ = registry.Register(transfer.AgentConfig{
-		Name:        "triage",
-		Description: "Analyzes the user's request and routes to the appropriate specialist.",
-		ModelName:   req.Model,
-		SystemInstructions: `You are a triage agent. Analyze the user's request and transfer to the right specialist:
+	triage := agent.NewRunnerAgent(chat,
+		agent.WithName("triage"),
+		agent.WithDescription("Analyzes the user's request and routes to the appropriate specialist."),
+		agent.WithModelName(req.Model),
+		agent.WithMaxSteps(4),
+		agent.WithSystemInstructions(`You are a triage agent. Analyze the user's request and transfer to the right specialist:
 - For math/calculation tasks → transfer to "math_expert"
 - For writing/creative/other tasks → transfer to "writer"
-Do NOT attempt to answer yourself. Always transfer to a specialist.`,
-		ChatModel:   chat,
-		MaxSteps:    4,
-		CallOptions: []model.CallOption{model.WithTemperature(0.1)},
-	})
+Do NOT attempt to answer yourself. Always transfer to a specialist.`),
+		agent.WithCallOptions(model.WithTemperature(0.1)),
+	)
 
-	_ = registry.Register(transfer.AgentConfig{
-		Name:        "math_expert",
-		Description: "Solves math problems step by step using arithmetic tools (add, subtract, multiply, divide).",
-		ModelName:   req.Model,
-		SystemInstructions: `You are a math expert. You have four arithmetic tools: add, subtract, multiply, divide.
+	mathExpert := agent.NewRunnerAgent(chat,
+		agent.WithName("math_expert"),
+		agent.WithDescription("Solves math problems step by step using arithmetic tools (add, subtract, multiply, divide)."),
+		agent.WithModelName(req.Model),
+		agent.WithMaxSteps(12),
+		agent.WithToolInfos(mathToolInfos()),
+		agent.WithSystemInstructions(`You are a math expert. You have four arithmetic tools: add, subtract, multiply, divide.
 You MUST call tools for every calculation step. Never compute in your head.
-When multiple steps depend on previous results, call them one step at a time.`,
-		ChatModel:   chat,
-		ToolInfos:   mathToolInfos(),
-		MaxSteps:    12,
-		CallOptions: []model.CallOption{model.WithTemperature(0.1)},
-	})
+When multiple steps depend on previous results, call them one step at a time.`),
+		agent.WithCallOptions(model.WithTemperature(0.1)),
+	)
 
-	_ = registry.Register(transfer.AgentConfig{
-		Name:        "writer",
-		Description: "Creates creative text, stories, poems, and other written content.",
-		ModelName:   req.Model,
-		SystemInstructions: `You are a creative writer. Produce engaging, well-structured text based on the user's request.
-Be creative and thoughtful in your writing.`,
-		ChatModel:   chat,
-		MaxSteps:    6,
-		CallOptions: []model.CallOption{model.WithTemperature(0.7)},
-	})
+	writer := agent.NewRunnerAgent(chat,
+		agent.WithName("writer"),
+		agent.WithDescription("Creates creative text, stories, poems, and other written content."),
+		agent.WithModelName(req.Model),
+		agent.WithMaxSteps(6),
+		agent.WithSystemInstructions(`You are a creative writer. Produce engaging, well-structured text based on the user's request.
+Be creative and thoughtful in your writing.`),
+		agent.WithCallOptions(model.WithTemperature(0.7)),
+	)
 
-	return transfer.NewOrchestrator(registry, "triage", transfer.WithMaxTransfers(5))
+	triage.AddHandoff(mathExpert, writer)
+	mathExpert.AddHandoff(triage)
+
+	return transfer.NewOrchestrator(triage, transfer.WithMaxTransfers(5))
 }
 
 // --- handler ---

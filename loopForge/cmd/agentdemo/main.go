@@ -188,60 +188,45 @@ When multiple steps depend on previous results, call them one step at a time and
 
 func runTransferDemo(ctx context.Context, cfg demoConfig) {
 	chat := arkdoubao.NewArkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
-	registry := transfer.NewRegistry()
 
-	if err := registry.Register(transfer.AgentConfig{
-		Name:        "triage",
-		Description: "Routes user requests to the appropriate specialist agent.",
-		ModelName:   cfg.Model,
-		SystemInstructions: `You are a triage agent. Analyze the user's request and transfer to the right specialist:
+	triage := agent.NewRunnerAgent(chat,
+		agent.WithName("triage"),
+		agent.WithDescription("Routes user requests to the appropriate specialist agent."),
+		agent.WithModelName(cfg.Model),
+		agent.WithMaxSteps(4),
+		agent.WithSystemInstructions(`You are a triage agent. Analyze the user's request and transfer to the right specialist:
 - For math/calculation tasks → transfer to "math_expert"
 - For writing/creative tasks → transfer to "writer"
-Do NOT attempt to answer yourself. Always transfer to a specialist.`,
-		ChatModel:   chat,
-		MaxSteps:    4,
-		CallOptions: []model.CallOption{model.WithTemperature(0.1)},
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "register triage: %v\n", err)
-		os.Exit(1)
-	}
+Do NOT attempt to answer yourself. Always transfer to a specialist.`),
+		agent.WithCallOptions(model.WithTemperature(0.1)),
+	)
 
-	if err := registry.Register(transfer.AgentConfig{
-		Name:        "math_expert",
-		Description: "Solves math problems step by step using arithmetic tools.",
-		ModelName:   cfg.Model,
-		SystemInstructions: `You are a math expert. You have four arithmetic tools: add, subtract, multiply, divide.
+	mathExpert := agent.NewRunnerAgent(chat,
+		agent.WithName("math_expert"),
+		agent.WithDescription("Solves math problems step by step using arithmetic tools."),
+		agent.WithModelName(cfg.Model),
+		agent.WithMaxSteps(12),
+		agent.WithToolInfos(mathToolInfos()),
+		agent.WithSystemInstructions(`You are a math expert. You have four arithmetic tools: add, subtract, multiply, divide.
 You MUST call tools for every calculation step. Never compute in your head.
-When multiple steps depend on previous results, call them one step at a time.`,
-		ChatModel:   chat,
-		ToolInfos:   mathToolInfos(),
-		MaxSteps:    12,
-		CallOptions: []model.CallOption{model.WithTemperature(0.1)},
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "register math_expert: %v\n", err)
-		os.Exit(1)
-	}
+When multiple steps depend on previous results, call them one step at a time.`),
+		agent.WithCallOptions(model.WithTemperature(0.1)),
+	)
 
-	if err := registry.Register(transfer.AgentConfig{
-		Name:        "writer",
-		Description: "Creates creative text, stories, poems, and other written content.",
-		ModelName:   cfg.Model,
-		SystemInstructions: `You are a creative writer. Produce engaging, well-structured text based on the user's request.
-Be creative and thoughtful in your writing.`,
-		ChatModel:   chat,
-		MaxSteps:    4,
-		CallOptions: []model.CallOption{model.WithTemperature(0.7)},
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "register writer: %v\n", err)
-		os.Exit(1)
-	}
+	writer := agent.NewRunnerAgent(chat,
+		agent.WithName("writer"),
+		agent.WithDescription("Creates creative text, stories, poems, and other written content."),
+		agent.WithModelName(cfg.Model),
+		agent.WithMaxSteps(4),
+		agent.WithSystemInstructions(`You are a creative writer. Produce engaging, well-structured text based on the user's request.
+Be creative and thoughtful in your writing.`),
+		agent.WithCallOptions(model.WithTemperature(0.7)),
+	)
 
-	if err := registry.Validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "registry validate: %v\n", err)
-		os.Exit(1)
-	}
+	triage.AddHandoff(mathExpert, writer)
+	mathExpert.AddHandoff(triage)
 
-	orch := transfer.NewOrchestrator(registry, "triage", transfer.WithMaxTransfers(5))
+	orch := transfer.NewOrchestrator(triage, transfer.WithMaxTransfers(5))
 	streamAndPrint(ctx, orch, cfg)
 }
 

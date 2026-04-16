@@ -2,6 +2,8 @@
 // (Agent, Planner) and the default concrete Agent: RunnerAgent — a pkg/model chat loop with
 // function calling. Tool execution helpers live in loopforge/pkg/tool.
 //
-// Multi-agent transfer (handoff) orchestration is in the separate loopforge/pkg/transfer package;
-// RunnerAgent exposes ToolInterceptor / ExtraTools hooks for that purpose.
+// Transfer (handoff): RunnerAgent supports multi-agent transfer natively. Call
+// AddHandoff to register allowed handoff targets; the Orchestrator in
+// loopforge/pkg/transfer reads these via Handoffs() and injects transfer tools
+// at runtime. Clone() creates per-run copies for concurrency isolation.
 package agent

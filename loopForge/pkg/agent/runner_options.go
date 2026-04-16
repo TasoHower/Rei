@@ -19,6 +19,14 @@ func NewRunnerAgent(chat model.ToolCallingChatModel, opts ...RunnerOption) *Runn
 	return a
 }
 
+// WithDescription sets a human-readable summary used in transfer tool
+// descriptions when this agent is a handoff target.
+func WithDescription(d string) RunnerOption {
+	return func(a *RunnerAgent) {
+		a.Description = d
+	}
+}
+
 // WithSystemInstructions sets the system prompt prepended as a system message.
 func WithSystemInstructions(s string) RunnerOption {
 	return func(a *RunnerAgent) {

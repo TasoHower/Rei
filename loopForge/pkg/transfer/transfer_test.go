@@ -2,29 +2,31 @@ package transfer
 
 import (
 	"context"
+	"sync"
 	"testing"
 
+	"loopforge/pkg/agent"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 )
 
 func TestOrchestrator_Transfer_HappyPath(t *testing.T) {
-	registry := NewRegistry()
-	_ = registry.Register(AgentConfig{
-		Name:               "triage",
-		Description:        "Routes requests",
-		ChatModel:          mockTransferChatModel{target: "expert"},
-		SystemInstructions: "You are triage.",
-	})
-	_ = registry.Register(AgentConfig{
-		Name:               "expert",
-		Description:        "Handles expert tasks",
-		ChatModel:          mockFinalChatModel{text: "The answer is 42."},
-		SystemInstructions: "You are an expert.",
-	})
+	triage := agent.NewRunnerAgent(
+		mockTransferChatModel{target: "expert"},
+		agent.WithName("triage"),
+		agent.WithDescription("Routes requests"),
+		agent.WithSystemInstructions("You are triage."),
+	)
+	expert := agent.NewRunnerAgent(
+		mockFinalChatModel{text: "The answer is 42."},
+		agent.WithName("expert"),
+		agent.WithDescription("Handles expert tasks"),
+		agent.WithSystemInstructions("You are an expert."),
+	)
+	triage.AddHandoff(expert)
 
-	orch := NewOrchestrator(registry, "triage", WithMaxTransfers(5))
+	orch := NewOrchestrator(triage, WithMaxTransfers(5))
 
 	ctx := context.Background()
 	ch := orch.Run(ctx, &request.RuntimeRequest{
@@ -71,17 +73,18 @@ func TestOrchestrator_Transfer_HappyPath(t *testing.T) {
 }
 
 func TestOrchestrator_MaxTransfers_Exceeded(t *testing.T) {
-	registry := NewRegistry()
-	_ = registry.Register(AgentConfig{
-		Name:      "ping",
-		ChatModel: mockTransferChatModel{target: "pong"},
-	})
-	_ = registry.Register(AgentConfig{
-		Name:      "pong",
-		ChatModel: mockTransferChatModel{target: "ping"},
-	})
+	ping := agent.NewRunnerAgent(
+		mockTransferChatModel{target: "pong"},
+		agent.WithName("ping"),
+	)
+	pong := agent.NewRunnerAgent(
+		mockTransferChatModel{target: "ping"},
+		agent.WithName("pong"),
+	)
+	ping.AddHandoff(pong)
+	pong.AddHandoff(ping)
 
-	orch := NewOrchestrator(registry, "ping", WithMaxTransfers(3))
+	orch := NewOrchestrator(ping, WithMaxTransfers(3))
 
 	ctx := context.Background()
 	ch := orch.Run(ctx, &request.RuntimeRequest{
@@ -113,14 +116,13 @@ func TestOrchestrator_MaxTransfers_Exceeded(t *testing.T) {
 }
 
 func TestOrchestrator_SingleAgent_NoTransfer(t *testing.T) {
-	registry := NewRegistry()
-	_ = registry.Register(AgentConfig{
-		Name:               "solo",
-		ChatModel:          mockFinalChatModel{text: "Just me."},
-		SystemInstructions: "solo agent",
-	})
+	solo := agent.NewRunnerAgent(
+		mockFinalChatModel{text: "Just me."},
+		agent.WithName("solo"),
+		agent.WithSystemInstructions("solo agent"),
+	)
 
-	orch := NewOrchestrator(registry, "solo")
+	orch := NewOrchestrator(solo)
 
 	ctx := context.Background()
 	ch := orch.Run(ctx, &request.RuntimeRequest{
@@ -142,4 +144,66 @@ func TestOrchestrator_SingleAgent_NoTransfer(t *testing.T) {
 	if len(qe.Outcome.TransferChain) != 1 || qe.Outcome.TransferChain[0] != "solo" {
 		t.Fatalf("TransferChain=%v", qe.Outcome.TransferChain)
 	}
+}
+
+func TestOrchestrator_Transfer_NoToolCallEvents(t *testing.T) {
+	triage := agent.NewRunnerAgent(
+		mockTransferChatModel{target: "expert"},
+		agent.WithName("triage"),
+	)
+	expert := agent.NewRunnerAgent(
+		mockFinalChatModel{text: "done"},
+		agent.WithName("expert"),
+	)
+	triage.AddHandoff(expert)
+
+	orch := NewOrchestrator(triage)
+	ch := orch.Run(context.Background(), &request.RuntimeRequest{
+		SessionID:   "test-no-toolcall",
+		UserMessage: "test",
+	})
+	events := collectEvents(ch)
+
+	for _, ev := range events {
+		if ev.Type == event.EventToolCallStart || ev.Type == event.EventToolCallEnd {
+			t.Fatalf("unexpected %s event during transfer", ev.Type)
+		}
+	}
+}
+
+func TestOrchestrator_ConcurrentRuns(t *testing.T) {
+	triage := agent.NewRunnerAgent(
+		mockTransferChatModel{target: "expert"},
+		agent.WithName("triage"),
+	)
+	expert := agent.NewRunnerAgent(
+		mockFinalChatModel{text: "answer"},
+		agent.WithName("expert"),
+	)
+	triage.AddHandoff(expert)
+
+	orch := NewOrchestrator(triage, WithMaxTransfers(5))
+
+	const n = 10
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(id int) {
+			defer wg.Done()
+			ch := orch.Run(context.Background(), &request.RuntimeRequest{
+				SessionID:   "concurrent-" + string(rune('A'+id)),
+				UserMessage: "test",
+			})
+			events := collectEvents(ch)
+			qe := findQueryEnd(events)
+			if qe == nil || qe.Outcome == nil {
+				t.Errorf("segment %d: missing QueryEnd", id)
+				return
+			}
+			if qe.Outcome.Termination != outcome.TerminationCompleted {
+				t.Errorf("segment %d: termination=%q", id, qe.Outcome.Termination)
+			}
+		}(i)
+	}
+	wg.Wait()
 }

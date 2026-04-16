@@ -39,8 +39,13 @@ type LoopState struct {
 // Function calling: register ToolInfos (schema for the model). For each tool,
 // set ToolInfo.Handle to bind the local Go function, and/or set Executor as a
 // fallback (see loopforge/pkg/tool).
+//
+// Transfer (handoff): call AddHandoff to register other RunnerAgent instances
+// as allowed transfer targets. The Orchestrator in pkg/transfer reads these
+// via Handoffs() and injects the corresponding transfer tools at runtime.
 type RunnerAgent struct {
 	Name               string
+	Description        string // human-readable summary; surfaced in transfer tool descriptions
 	ModelName          string
 	SystemInstructions string
 	ChatModel          model.ToolCallingChatModel
@@ -61,6 +66,43 @@ type RunnerAgent struct {
 	// returns true, RunLoop returns an *InterceptedCall immediately instead
 	// of invoking the tool.
 	ToolInterceptor ToolInterceptor
+
+	handoffs []*RunnerAgent
+}
+
+// AddHandoff registers one or more agents as allowed transfer (handoff) targets.
+// The Orchestrator reads these at runtime to build transfer_to_{name} tools.
+func (a *RunnerAgent) AddHandoff(targets ...*RunnerAgent) {
+	a.handoffs = append(a.handoffs, targets...)
+}
+
+// Handoffs returns the registered transfer targets.
+func (a *RunnerAgent) Handoffs() []*RunnerAgent {
+	return a.handoffs
+}
+
+// Clone creates a shallow copy of the RunnerAgent with independent slice
+// headers. The elements themselves (e.g. *ToolInfo, *RunnerAgent in handoffs)
+// are shared — they are treated as immutable templates.
+func (a *RunnerAgent) Clone() *RunnerAgent {
+	c := *a
+	if a.ToolInfos != nil {
+		c.ToolInfos = make([]*model.ToolInfo, len(a.ToolInfos))
+		copy(c.ToolInfos, a.ToolInfos)
+	}
+	if a.ExtraTools != nil {
+		c.ExtraTools = make([]*model.ToolInfo, len(a.ExtraTools))
+		copy(c.ExtraTools, a.ExtraTools)
+	}
+	if a.CallOptions != nil {
+		c.CallOptions = make([]model.CallOption, len(a.CallOptions))
+		copy(c.CallOptions, a.CallOptions)
+	}
+	if a.handoffs != nil {
+		c.handoffs = make([]*RunnerAgent, len(a.handoffs))
+		copy(c.handoffs, a.handoffs)
+	}
+	return &c
 }
 
 var _ Agent = (*RunnerAgent)(nil)
