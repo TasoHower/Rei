@@ -1,10 +1,10 @@
-// Doubao (Ark) stream demo via pkg/model streaming Recv.
+// Lark (Ark) stream demo via pkg/model streaming Recv (volcengine-go-sdk).
 //
 // Env:
-//   - ARK_API_KEY or DOUBAO_API_KEY (required)
-//   - ARK_MODEL or DOUBAO_MODEL (optional, default deepseek-v3-2-251201)
-//   - DOUBAO_BASE_URL (optional, default https://ark.cn-beijing.volces.com/api/v3)
-//   - DOUBAO_USER_MESSAGE (optional, default asks 1+1)
+//   - LARK_API_KEY or DOUBAO_API_KEY or ARK_API_KEY (required)
+//   - LARK_MODEL or ARK_MODEL or DOUBAO_MODEL (optional, default deepseek-v3-2-251201)
+//   - LARK_BASE_URL or DOUBAO_BASE_URL (optional, default https://ark.cn-beijing.volces.com/api/v3)
+//   - LARK_USER_MESSAGE or DOUBAO_USER_MESSAGE (optional, default asks 1+1)
 package main
 
 import (
@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"loopforge/pkg/model"
-	arkdoubao "loopforge/pkg/model/adapters/doubao"
+	larkadapter "loopforge/pkg/model/adapters/lark"
 )
 
 const (
@@ -33,25 +33,37 @@ type streamConfig struct {
 }
 
 func loadStreamConfig() (streamConfig, error) {
-	key := strings.TrimSpace(os.Getenv("DOUBAO_API_KEY"))
+	key := strings.TrimSpace(os.Getenv("LARK_API_KEY"))
+	if key == "" {
+		key = strings.TrimSpace(os.Getenv("DOUBAO_API_KEY"))
+	}
 	if key == "" {
 		key = strings.TrimSpace(os.Getenv("ARK_API_KEY"))
 	}
 	if key == "" {
-		return streamConfig{}, fmt.Errorf("set ARK_API_KEY or DOUBAO_API_KEY")
+		return streamConfig{}, fmt.Errorf("set LARK_API_KEY or DOUBAO_API_KEY or ARK_API_KEY")
 	}
-	base := strings.TrimSpace(os.Getenv("DOUBAO_BASE_URL"))
+	base := strings.TrimSpace(os.Getenv("LARK_BASE_URL"))
+	if base == "" {
+		base = strings.TrimSpace(os.Getenv("DOUBAO_BASE_URL"))
+	}
 	if base == "" {
 		base = defaultBaseURL
 	}
-	m := strings.TrimSpace(os.Getenv("ARK_MODEL"))
+	m := strings.TrimSpace(os.Getenv("LARK_MODEL"))
+	if m == "" {
+		m = strings.TrimSpace(os.Getenv("ARK_MODEL"))
+	}
 	if m == "" {
 		m = strings.TrimSpace(os.Getenv("DOUBAO_MODEL"))
 	}
 	if m == "" {
 		m = defaultModel
 	}
-	msg := strings.TrimSpace(os.Getenv("DOUBAO_USER_MESSAGE"))
+	msg := strings.TrimSpace(os.Getenv("LARK_USER_MESSAGE"))
+	if msg == "" {
+		msg = strings.TrimSpace(os.Getenv("DOUBAO_USER_MESSAGE"))
+	}
 	if msg == "" {
 		msg = defaultUserText
 	}
@@ -63,8 +75,8 @@ func loadStreamConfig() (streamConfig, error) {
 	}, nil
 }
 
-// runDoubaoStream streams one user turn through the chat model and writes assistant tokens to w.
-func runDoubaoStream(ctx context.Context, w io.Writer) error {
+// runLarkStream streams one user turn through the chat model and writes assistant tokens to w.
+func runLarkStream(ctx context.Context, w io.Writer) error {
 	if w == nil {
 		w = io.Discard
 	}
@@ -73,7 +85,7 @@ func runDoubaoStream(ctx context.Context, w io.Writer) error {
 		return err
 	}
 
-	cm := arkdoubao.NewArkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
+	cm := larkadapter.NewLarkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
 
 	msgs := []*model.Message{
 		{Role: model.RoleUser, Content: cfg.UserMessage},

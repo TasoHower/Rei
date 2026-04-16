@@ -77,6 +77,9 @@ type CallLLMStartPayload struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty"`
 	TopP        *float64 `json:"top_p,omitempty"`
+	// SystemPrompt is the final system instructions sent on this LLM call
+	// (after builders, variable block merge, and VarStore {{}} replacement).
+	SystemPrompt string `json:"system_prompt,omitempty"`
 }
 
 func (*CallLLMStartPayload) eventPayload() EventMessageType { return EventCallLLMStart }

@@ -49,7 +49,7 @@ make run
 
 ## test-server
 
-基于 Hertz 的 Agent 调试服务器，提供 Web UI 和 SSE 流式接口，用于测试 loopForge 引擎的 Agent 运行效果。内置四则运算工具，使用豆包（Doubao）作为 LLM Provider。
+基于 Hertz 的 Agent 调试服务器，提供 Web UI 和 SSE 流式接口，用于测试 loopForge 引擎的 Agent 运行效果。内置四则运算工具，LLM 侧使用 **Lark（火山 Ark）** 适配器（`volcengine-go-sdk`）。
 
 ```bash
 cd test-server
@@ -71,7 +71,7 @@ Rei 的目标是构建一套**完整的 Go 原生 AI Agent 基础设施**——�
 
 **SeRagLF — 从功能完备到生产就绪：**
 
-- LLM API 实际联调（OpenAI / 豆包 Ark）
+- LLM API 实际联调（OpenAI / Lark Ark）
 - Redis Embedding 缓存，减少重复向量化请求
 - 集成测试（testcontainers: MySQL + Redis + Qdrant）
 
@@ -101,4 +101,4 @@ Rei 的目标是构建一套**完整的 Go 原生 AI Agent 基础设施**——�
 | 关系数据库 | MySQL 8.4 |
 | 缓存 | Redis 7 |
 | HTTP 框架 | Hertz (CloudWeGo) |
-| LLM Provider | OpenAI / Doubao (Ark) |
+| LLM Provider | OpenAI / Lark (Volcengine Ark) |

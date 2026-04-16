@@ -20,7 +20,7 @@ import (
 // standalone use.
 //
 // Returns an *InterceptedCall if a ToolInterceptor matched, or nil for
-// normal completion / error. On completion or terminal error, EventQueryEnd is
+// normal completion or error. On completion or terminal error, EventQueryEnd is
 // emitted last (after the final EventCallLLMEnd when an LLM round occurred).
 func (a *Agent) RunLoop(
 	ctx context.Context,
@@ -39,9 +39,6 @@ func (a *Agent) RunLoop(
 		}
 	}
 
-	// QueryEnd is always the last outbound event for this RunLoop invocation
-	// (after the final call_llm_end and any error payload). Transfer intercepts
-	// clear pendingQueryEnd before returning so the runner can continue the chain.
 	var pendingQueryEnd *outcome.RuntimeOutcome
 	var pendingQueryEndStep int
 	defer func() {
@@ -63,8 +60,6 @@ func (a *Agent) RunLoop(
 		pendingQueryEndStep = step
 	}
 
-	// --- validation ---
-
 	if req == nil {
 		emitError("invalid_request", "request is nil", 0)
 		return nil
@@ -73,8 +68,6 @@ func (a *Agent) RunLoop(
 		emitError("invalid_config", "Agent.ChatModel is nil", 0)
 		return nil
 	}
-
-	// --- variable store ---
 
 	if state != nil && state.VarStore != nil {
 		vstore = state.VarStore
@@ -89,21 +82,15 @@ func (a *Agent) RunLoop(
 		varTools = []*model.ToolInfo{variable.VarSetTool(vstore)}
 	}
 
-	// --- prepare tools and model ---
-
 	m, setupErr := a.bindModel(varTools...)
 	if setupErr != nil {
 		emitError(setupErr.Code, setupErr.Msg, 0)
 		return nil
 	}
 
-	// --- initial messages ---
-
 	var msgs []*model.Message
-	var userTemplate string
-	var displayUser string
+	var userTemplate, displayUser string
 	freshSession := inheritedMsgs == nil
-
 	if freshSession {
 		userTemplate = req.UserMessage
 		p0 := stringParamsFromVarStore(vstore)
@@ -117,42 +104,15 @@ func (a *Agent) RunLoop(
 	opts, modelName := a.resolveCallOptions(req)
 	callCfg := model.ApplyCallOptions(opts...)
 
-	// --- metrics tracking ---
-
 	var totalInputTokens, totalOutputTokens int64
 
 	buildMetrics := func(steps int) outcome.RunMetrics {
-		rm := outcome.RunMetrics{
-			Model:        modelName,
-			InputTokens:  totalInputTokens,
-			OutputTokens: totalOutputTokens,
-			TotalTokens:  totalInputTokens + totalOutputTokens,
-			Steps:        steps,
-		}
-		if state != nil {
-			rm.InputTokens += state.AccumulatedMetrics.InputTokens
-			rm.OutputTokens += state.AccumulatedMetrics.OutputTokens
-			rm.TotalTokens += state.AccumulatedMetrics.TotalTokens
-			rm.Steps += state.AccumulatedMetrics.Steps
-		}
-		return rm
+		return a.runLoopMetrics(state, modelName, totalInputTokens, totalOutputTokens, steps)
 	}
-
+	
 	buildOutcome := func(finalText string, termination outcome.TerminationReason, steps int) *outcome.RuntimeOutcome {
-		oc := &outcome.RuntimeOutcome{
-			RunID:       runID,
-			FinalText:   finalText,
-			Termination: termination,
-			Metrics:     buildMetrics(steps),
-			VarStore:    vstore,
-		}
-		if state != nil {
-			oc.TransferChain = append(state.TransferChain, a.Name)
-		}
-		return oc
+		return a.runLoopOutcome(runID, state, vstore, finalText, termination, buildMetrics(steps))
 	}
-
-	// --- emit bookends ---
 
 	if state == nil || !state.SuppressBookends {
 		emit(0, &event.StartPayload{})
@@ -163,8 +123,6 @@ func (a *Agent) RunLoop(
 		emit(0, &event.QuestionPayload{UserMessage: qm})
 	}
 
-	// --- main loop ---
-
 	var lastText string
 	for step := range maxSteps {
 		if freshSession {
@@ -172,62 +130,20 @@ func (a *Agent) RunLoop(
 			msgs = replaceFirstUserMessage(msgs, userStep)
 		}
 
-		blockBeforeBuilder := ""
-		if a.Variable {
-			blockBeforeBuilder = vstore.PromptBlock()
-		}
-
-		fullSystem := baseSystem
-		if a.SystemPromptBuilder != nil {
-			sb := SystemPromptBuildContext{
-				Ctx:                 ctx,
-				Request:             req,
-				VarStore:            vstore,
-				Agent:               a,
-				Step:                step,
-				BaseSystemPrompt:    baseSystem,
-				VariablePromptBlock: blockBeforeBuilder,
-			}
-
-			var err error
-
-			fullSystem, err = a.SystemPromptBuilder(sb)
-			if err != nil {
-				emitError("system_prompt_builder", err.Error(), step)
-				return nil
-			}
-		}
-
-		block := ""
-		if a.Variable {
-			block = vstore.PromptBlock()
-			log.Default().Debug("variables prompt block",
-				"agent", a.Name,
-				"run_id", runID,
-				"step", step,
-				"block_len", len(block),
-				"var_count", vstore.Len(),
-			)
-		}
-		if block != "" {
-			if fullSystem != "" {
-				fullSystem = fullSystem + "\n\n" + block
-			} else {
-				fullSystem = block
-			}
-		}
-
-		if p := stringParamsFromVarStore(vstore); len(p) > 0 {
-			fullSystem = ReplaceDoubleBraceParams(fullSystem, p)
+		fullSystem, err := a.runLoopFullSystem(ctx, req, vstore, baseSystem, step, runID)
+		if err != nil {
+			emitError("system_prompt_builder", err.Error(), step)
+			return nil
 		}
 
 		msgs = replaceSystemMessage(msgs, fullSystem)
 
 		emit(step, &event.CallLLMStartPayload{
-			Model:       modelName,
-			Temperature: callCfg.Temperature,
-			MaxTokens:   callCfg.MaxTokens,
-			TopP:        callCfg.TopP,
+			Model:        modelName,
+			Temperature:  callCfg.Temperature,
+			MaxTokens:    callCfg.MaxTokens,
+			TopP:         callCfg.TopP,
+			SystemPrompt: fullSystem,
 		})
 
 		sr := consumeStream(ctx, m, msgs, opts, emit, step)
@@ -247,9 +163,9 @@ func (a *Agent) RunLoop(
 			InputTokens:  sr.InputTokens,
 			OutputTokens: sr.OutputTokens,
 		})
+
 		totalInputTokens += sr.InputTokens
 		totalOutputTokens += sr.OutputTokens
-
 		lastText = sr.Text
 		msgs = append(msgs, &model.Message{
 			Role:         model.RoleAssistant,
@@ -259,42 +175,17 @@ func (a *Agent) RunLoop(
 			OutputTokens: sr.OutputTokens,
 		})
 
-		// No tool calls → model finished naturally (call_llm_end already emitted).
 		if len(sr.ToolCalls) == 0 {
 			pendingQueryEnd = buildOutcome(lastText, outcome.TerminationCompleted, step+1)
 			pendingQueryEndStep = step
 			return nil
 		}
 
-		// Check for intercepted tool calls (e.g. transfer).
-		// Intercepted calls are control-flow signals — no ToolCallStart/End
-		// events are emitted. The orchestrator emits its own event (e.g.
-		// AgentTransfer) to signal what happened.
-		if a.ToolInterceptor != nil {
-			for i := range sr.ToolCalls {
-				tc := sr.ToolCalls[i]
-				if a.ToolInterceptor(tc) {
-					pendingQueryEnd = nil
-					ic := &InterceptedCall{
-						ToolCall: tc,
-						Msgs:     msgs,
-						Metrics: outcome.RunMetrics{
-							Model:        modelName,
-							InputTokens:  totalInputTokens,
-							OutputTokens: totalOutputTokens,
-							TotalTokens:  totalInputTokens + totalOutputTokens,
-							Steps:        step + 1,
-						},
-					}
-					if vstore != nil {
-						ic.VarSnapshot = vstore.Snapshot()
-					}
-					return ic
-				}
-			}
+		if ic := a.runLoopInterceptIfNeeded(msgs, sr, vstore, modelName, totalInputTokens, totalOutputTokens, step); ic != nil {
+			pendingQueryEnd = nil
+			return ic
 		}
 
-		// Execute regular tool calls (use merged list so ExtraTools + var_set resolve).
 		invokeInfos := a.mergedToolInfos(varTools...)
 		toolMsgs, toolErr := executeToolCalls(ctx, invokeInfos, a.Executor, sr.ToolCalls, emit, step)
 		if toolErr != nil {
@@ -308,6 +199,144 @@ func (a *Agent) RunLoop(
 	pendingQueryEndStep = 0
 	if maxSteps > 0 {
 		pendingQueryEndStep = maxSteps - 1
+	}
+	return nil
+}
+
+// runLoopFullSystem builds system instructions for one step: optional builder,
+// variable block, then VarStore {{}} replacement.
+func (a *Agent) runLoopFullSystem(
+	ctx context.Context,
+	req *request.RuntimeRequest,
+	vstore *variable.VarStore,
+	baseSystem string,
+	step int,
+	runID string,
+) (string, error) {
+	blockBeforeBuilder := ""
+	if a.Variable {
+		blockBeforeBuilder = vstore.PromptBlock()
+	}
+
+	full := baseSystem
+	if a.SystemPromptBuilder != nil {
+		sb := SystemPromptBuildContext{
+			Ctx:                 ctx,
+			Request:             req,
+			VarStore:            vstore,
+			Agent:               a,
+			Step:                step,
+			BaseSystemPrompt:    baseSystem,
+			VariablePromptBlock: blockBeforeBuilder,
+		}
+		var err error
+		full, err = a.SystemPromptBuilder(sb)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	block := ""
+	if a.Variable {
+		block = vstore.PromptBlock()
+		log.Default().Debug("variables prompt block",
+			"agent", a.Name,
+			"run_id", runID,
+			"step", step,
+			"block_len", len(block),
+			"var_count", vstore.Len(),
+		)
+	}
+	if block != "" {
+		if full != "" {
+			full = full + "\n\n" + block
+		} else {
+			full = block
+		}
+	}
+
+	if p := stringParamsFromVarStore(vstore); len(p) > 0 {
+		full = ReplaceDoubleBraceParams(full, p)
+	}
+	return full, nil
+}
+
+func (a *Agent) runLoopMetrics(
+	state *LoopState,
+	modelName string,
+	totalIn, totalOut int64,
+	steps int,
+) outcome.RunMetrics {
+	rm := outcome.RunMetrics{
+		Model:        modelName,
+		InputTokens:  totalIn,
+		OutputTokens: totalOut,
+		TotalTokens:  totalIn + totalOut,
+		Steps:        steps,
+	}
+	if state != nil {
+		rm.InputTokens += state.AccumulatedMetrics.InputTokens
+		rm.OutputTokens += state.AccumulatedMetrics.OutputTokens
+		rm.TotalTokens += state.AccumulatedMetrics.TotalTokens
+		rm.Steps += state.AccumulatedMetrics.Steps
+	}
+	return rm
+}
+
+func (a *Agent) runLoopOutcome(
+	runID string,
+	state *LoopState,
+	vstore *variable.VarStore,
+	finalText string,
+	termination outcome.TerminationReason,
+	metrics outcome.RunMetrics,
+) *outcome.RuntimeOutcome {
+	oc := &outcome.RuntimeOutcome{
+		RunID:       runID,
+		FinalText:   finalText,
+		Termination: termination,
+		Metrics:     metrics,
+		VarStore:    vstore,
+	}
+	if state != nil {
+		oc.TransferChain = append(state.TransferChain, a.Name)
+	}
+	return oc
+}
+
+// runLoopInterceptIfNeeded returns a non-nil *InterceptedCall when ToolInterceptor
+// handles a tool call (e.g. transfer). sr must be the stream result after token
+// totals for this round are applied to the running sums passed in as totalIn/totalOut.
+func (a *Agent) runLoopInterceptIfNeeded(
+	msgs []*model.Message,
+	sr streamResult,
+	vstore *variable.VarStore,
+	modelName string,
+	totalIn, totalOut int64,
+	step int,
+) *InterceptedCall {
+	if a.ToolInterceptor == nil {
+		return nil
+	}
+	for i := range sr.ToolCalls {
+		tc := sr.ToolCalls[i]
+		if a.ToolInterceptor(tc) {
+			ic := &InterceptedCall{
+				ToolCall: tc,
+				Msgs:     msgs,
+				Metrics: outcome.RunMetrics{
+					Model:        modelName,
+					InputTokens:  totalIn,
+					OutputTokens: totalOut,
+					TotalTokens:  totalIn + totalOut,
+					Steps:        step + 1,
+				},
+			}
+			if vstore != nil {
+				ic.VarSnapshot = vstore.Snapshot()
+			}
+			return ic
+		}
 	}
 	return nil
 }

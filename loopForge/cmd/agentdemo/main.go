@@ -5,10 +5,10 @@
 //   - transfer:         multi-agent handoff — triage → math_expert / writer.
 //
 // Env:
-//   - ARK_API_KEY or DOUBAO_API_KEY (required)
-//   - ARK_MODEL or DOUBAO_MODEL (optional, default deepseek-v3-2-251201)
-//   - DOUBAO_BASE_URL (optional)
-//   - DOUBAO_USER_MESSAGE (optional)
+//   - LARK_API_KEY or DOUBAO_API_KEY or ARK_API_KEY (required)
+//   - LARK_MODEL or ARK_MODEL or DOUBAO_MODEL (optional, default deepseek-v3-2-251201)
+//   - LARK_BASE_URL or DOUBAO_BASE_URL (optional)
+//   - LARK_USER_MESSAGE or DOUBAO_USER_MESSAGE (optional)
 //   - DEMO_MODE (optional: "single" | "transfer", default "single")
 //
 // Offline tool test (no API key): go test ./pkg/agent/... -run TestRunnerAgent_toolLoop
@@ -24,7 +24,7 @@ import (
 
 	"loopforge/pkg/agent"
 	"loopforge/pkg/model"
-	arkdoubao "loopforge/pkg/model/adapters/doubao"
+	larkadapter "loopforge/pkg/model/adapters/lark"
 	"loopforge/pkg/runner"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
@@ -52,18 +52,27 @@ type demoConfig struct {
 }
 
 func loadConfig() (demoConfig, error) {
-	key := strings.TrimSpace(os.Getenv("DOUBAO_API_KEY"))
+	key := strings.TrimSpace(os.Getenv("LARK_API_KEY"))
+	if key == "" {
+		key = strings.TrimSpace(os.Getenv("DOUBAO_API_KEY"))
+	}
 	if key == "" {
 		key = strings.TrimSpace(os.Getenv("ARK_API_KEY"))
 	}
 	if key == "" {
-		return demoConfig{}, fmt.Errorf("set ARK_API_KEY or DOUBAO_API_KEY")
+		return demoConfig{}, fmt.Errorf("set LARK_API_KEY or DOUBAO_API_KEY or ARK_API_KEY")
 	}
-	base := strings.TrimSpace(os.Getenv("DOUBAO_BASE_URL"))
+	base := strings.TrimSpace(os.Getenv("LARK_BASE_URL"))
+	if base == "" {
+		base = strings.TrimSpace(os.Getenv("DOUBAO_BASE_URL"))
+	}
 	if base == "" {
 		base = defaultBaseURL
 	}
-	m := strings.TrimSpace(os.Getenv("ARK_MODEL"))
+	m := strings.TrimSpace(os.Getenv("LARK_MODEL"))
+	if m == "" {
+		m = strings.TrimSpace(os.Getenv("ARK_MODEL"))
+	}
 	if m == "" {
 		m = strings.TrimSpace(os.Getenv("DOUBAO_MODEL"))
 	}
@@ -76,7 +85,10 @@ func loadConfig() (demoConfig, error) {
 		mode = "single"
 	}
 
-	msg := strings.TrimSpace(os.Getenv("DOUBAO_USER_MESSAGE"))
+	msg := strings.TrimSpace(os.Getenv("LARK_USER_MESSAGE"))
+	if msg == "" {
+		msg = strings.TrimSpace(os.Getenv("DOUBAO_USER_MESSAGE"))
+	}
 	if msg == "" {
 		if mode == "transfer" {
 			msg = transferUserText
@@ -165,7 +177,7 @@ func mathToolInfos() []*model.ToolInfo {
 // --- single-agent mode ---
 
 func runSingleAgent(ctx context.Context, cfg demoConfig) {
-	chat := arkdoubao.NewArkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
+	chat := larkadapter.NewLarkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
 	runner := agent.New(chat,
 		agent.WithName("agentdemo"),
 		agent.WithModelName(cfg.Model),
@@ -187,7 +199,7 @@ When multiple steps depend on previous results, call them one step at a time and
 // --- multi-agent transfer mode ---
 
 func runTransferDemo(ctx context.Context, cfg demoConfig) {
-	chat := arkdoubao.NewArkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
+	chat := larkadapter.NewLarkChatModel(cfg.APIKey, cfg.BaseURL, cfg.Model)
 
 	triage := agent.New(chat,
 		agent.WithName("triage"),
@@ -255,6 +267,9 @@ func streamAndPrint(ctx context.Context, ag agent.Runnable, cfg demoConfig) {
 
 		case event.EventCallLLMStart:
 			fmt.Printf("\n── call_llm step %d ──\n", ev.Step)
+			if p := ev.CallLLMStart(); p != nil && p.SystemPrompt != "" {
+				fmt.Printf("%s\n", p.SystemPrompt)
+			}
 
 		case event.EventCallLLMEnd:
 			fmt.Printf("── call_llm_end step %d ──\n", ev.Step)
@@ -329,10 +344,10 @@ func main() {
 func printUsage(err error) {
 	fmt.Fprintf(os.Stderr, "agentdemo: %v\n\n", err)
 	fmt.Fprintf(os.Stderr, "Env:\n")
-	fmt.Fprintf(os.Stderr, "  ARK_API_KEY or DOUBAO_API_KEY   required\n")
-	fmt.Fprintf(os.Stderr, "  ARK_MODEL or DOUBAO_MODEL       default %s\n", defaultModel)
-	fmt.Fprintf(os.Stderr, "  DOUBAO_BASE_URL                 default %s\n", defaultBaseURL)
-	fmt.Fprintf(os.Stderr, "  DOUBAO_USER_MESSAGE             optional\n")
+	fmt.Fprintf(os.Stderr, "  LARK_API_KEY or DOUBAO_API_KEY or ARK_API_KEY   required\n")
+	fmt.Fprintf(os.Stderr, "  LARK_MODEL or ARK_MODEL or DOUBAO_MODEL         default %s\n", defaultModel)
+	fmt.Fprintf(os.Stderr, "  LARK_BASE_URL or DOUBAO_BASE_URL                default %s\n", defaultBaseURL)
+	fmt.Fprintf(os.Stderr, "  LARK_USER_MESSAGE or DOUBAO_USER_MESSAGE      optional\n")
 	fmt.Fprintf(os.Stderr, "  DEMO_MODE                       single | transfer (default single)\n")
 	fmt.Fprintf(os.Stderr, "Offline tool test: go test ./pkg/agent/... -run TestRunnerAgent_toolLoop\n")
 }

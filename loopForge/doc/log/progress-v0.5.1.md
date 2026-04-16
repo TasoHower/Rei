@@ -2,7 +2,7 @@
 
 > **版本**：v0.5.1  
 > **日期**：2026-04-16  
-> **里程碑**：VarStore 驱动的 `{{name}}` 占位 + 可选用户消息组合回调（UserMessageBuilder）  
+> **里程碑**：VarStore 驱动的 `{{name}}` 占位 + 可选 **SystemPromptBuilder**（每步动态组合 system，再经 VarStore 做 `{{}}` 替换）  
 > **上一版本**：v0.5.0（Variable）
 
 ---
@@ -11,7 +11,7 @@
 
 1. **双花括号占位**：在 **system** 与 **user** 文案中支持 `{{name}}`，取值来自当前 **`VarStore`** 的键（大小写不敏感匹配 key；不做驼峰/下划线归一；未命中则保留原文 `{{...}}`）。**不在 `RuntimeRequest` 上增加业务参数字段**；会话恢复通过外部 **`Materialize` / 快照 → `runner.WithVarStore(*VarStore)`** 完成。
 2. **每次调用 LLM 前刷新**：合并 `SystemInstructions`、（若开启 Variable）`PromptBlock()` 后，对 **system** 与 **user** 侧模板用 **当前** `VarStore` 重算 `{{...}}`，保证变量在 tool 执行后变化能反映到下一轮模型输入。
-3. **UserMessageBuilder（Prompt 组合回调）**：可选；若设置，则在 **首轮用户消息** 上先执行回调得到字符串，再对该字符串做 `{{...}}` 替换；未设置则使用 `RuntimeRequest.UserMessage` 作为模板。Transfer 继承历史消息时 **不**调用该回调。
+3. **SystemPromptBuilder（system 组合回调）**：可选；若设置，则在 **每一步** 在合并 `SystemInstructions`、Variable 块之后调用，得到 **system 文案**，再对该文案做 `{{...}}` 替换；未设置则使用默认合并（仅 `SystemInstructions` + `PromptBlock()`）。回调返回 error 时 Run 报错终止（`system_prompt_builder`）。Transfer 继承历史消息时仍按 **当前 Agent** 的 `SystemInstructions` / builder 重算 system（与首轮 user 是否回调无关——user 侧始终用 `RuntimeRequest.UserMessage` 为模板并做 `{{}}` 替换，见下节）。
 
 ---
 
@@ -31,7 +31,7 @@
    └──────────────────┘                │                             │
            │                             │  SystemInstructions         │
            │                             │  + PromptBlock (可选)       │
-           │                             │  + UserMessage 或 Builder   │
+           │                             │  + SystemPromptBuilder (可选)│
            │                             │       ↓                     │
            │                             │  ReplaceDoubleBraceParams   │
            │                             │  （键值来自 VarStore）       │
@@ -42,7 +42,7 @@
 
 ### 用户消息处理顺序（新会话，`inheritedMsgs == nil`）
 
-1. `userTemplate = req.UserMessage`，若配置了 **UserMessageBuilder** 则 `userTemplate = builder(PromptBuildContext)`（失败则 Run 报错终止）。
+1. `userTemplate = req.UserMessage`（**无**单独 UserMessage 侧 builder；动态组合在 **system** 侧由 **SystemPromptBuilder** 承担）。
 2. 对 `userTemplate` 做 **`{{...}}` 替换**（VarStore 当前值），得到首轮展示与首条 user 内容。
 3. **每一步 LLM 前**：用 **最新** VarStore 再次替换 **首条 user 消息**中的 `{{...}}`（与 system 同步刷新）。
 
@@ -57,9 +57,9 @@
 
 ## 交付清单
 
-- [x] `pkg/agent` — `ReplaceDoubleBraceParams`、`stringParamsFromVarStore`；RunLoop 每步刷新 system 与 user 中的占位符。
-- [x] `pkg/agent` — `PromptBuildContext`、`UserMessageBuilder`、`WithUserMessageBuilder`、`Agent.Clone` 拷贝。
-- [x] 单元测试：`brace_params_test.go`、`user_message_test.go`、Clone 覆盖。
+- [x] `pkg/agent` — `ReplaceDoubleBraceParams`、`stringParamsFromVarStore`；RunLoop 每步刷新 system 与首条 user 中的占位符。
+- [x] `pkg/agent` — `SystemPromptBuildContext`、`SystemPromptBuilder`、`WithSystemPromptBuilder`；`Agent.Clone` 拷贝 `SystemPromptBuilder`。
+- [x] 单元测试：`brace_params_test.go`、`user_message_test.go`（system builder + brace）、`clone_test.go` 等。
 - [x] 文档：本文件 + `doc/acceptance/v0.5.1-acceptance.md`。
 
 ---
@@ -69,4 +69,5 @@
 | 日期 | 说明 |
 |------|------|
 | 2026-04-16 | 初稿与多轮修订。 |
-| 2026-04-16 | 去掉「请求 Parameters」叙事；占位符统一来自 VarStore；补充 UserMessageBuilder 与每步刷新。 |
+| 2026-04-16 | 去掉「请求 Parameters」叙事；占位符统一来自 VarStore；补充 SystemPromptBuilder 与每步刷新。 |
+| 2026-04-16 | 文档命名统一：原「UserMessageBuilder」口径改为 **SystemPromptBuilder**（动态组合仅在 system 侧；user 为模板 + `{{}}`）。 |

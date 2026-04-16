@@ -5,6 +5,7 @@
 | 文档 | 对应版本计划 | 说明 |
 |------|----------------|------|
 | [v0.5.0-acceptance.md](./v0.5.0-acceptance.md) | [progress-v0.5.0.md](../log/progress-v0.5.0.md) | Variable：共享变量、Manifest/Materialize、Agent/Runner 集成 |
-| [v0.5.1-acceptance.md](./v0.5.1-acceptance.md) | [progress-v0.5.1.md](../log/progress-v0.5.1.md) | VarStore `{{name}}`、UserMessageBuilder、Runner `WithVarStore` |
+| [v0.5.1-acceptance.md](./v0.5.1-acceptance.md) | [progress-v0.5.1.md](../log/progress-v0.5.1.md) | VarStore `{{name}}`、SystemPromptBuilder、Runner `WithVarStore` |
+| [v0.5.2-acceptance.md](./v0.5.2-acceptance.md) | [progress-v0.5.2.md](../log/progress-v0.5.2.md) | Lark 模型适配器、`volcengine-go-sdk`、替代原 doubao OpenAI 兼容路径 |
 
 新建版本验收时：复制上一版结构，将「对照计划」链接到新的 progress 文件，并更新表格行。

@@ -20,7 +20,7 @@ import (
 	"loopforge/pkg/agent"
 	"loopforge/pkg/log"
 	"loopforge/pkg/model"
-	arkdoubao "loopforge/pkg/model/adapters/doubao"
+	larkadapter "loopforge/pkg/model/adapters/lark"
 	"loopforge/pkg/runner"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
@@ -62,14 +62,14 @@ type SSEEvent struct {
 
 func (r *ChatRequest) resolveDefaults() {
 	if r.APIKey == "" {
-		r.APIKey = firstNonEmpty(os.Getenv("DOUBAO_API_KEY"), os.Getenv("ARK_API_KEY"))
+		r.APIKey = firstNonEmpty(os.Getenv("LARK_API_KEY"), os.Getenv("DOUBAO_API_KEY"), os.Getenv("ARK_API_KEY"))
 	}
 	if r.BaseURL == "" {
-		r.BaseURL = firstNonEmpty(os.Getenv("DOUBAO_BASE_URL"), defaultBaseURL)
+		r.BaseURL = firstNonEmpty(os.Getenv("LARK_BASE_URL"), os.Getenv("DOUBAO_BASE_URL"), defaultBaseURL)
 	}
 	r.BaseURL = strings.TrimRight(strings.TrimSpace(r.BaseURL), "/")
 	if r.Model == "" {
-		r.Model = firstNonEmpty(os.Getenv("ARK_MODEL"), os.Getenv("DOUBAO_MODEL"), defaultModel)
+		r.Model = firstNonEmpty(os.Getenv("LARK_MODEL"), os.Getenv("ARK_MODEL"), os.Getenv("DOUBAO_MODEL"), defaultModel)
 	}
 	if r.SystemPrompt == "" {
 		r.SystemPrompt = defaultSystemPrompt
@@ -210,7 +210,7 @@ func mathToolInfos() []*model.ToolInfo {
 // --- agent builders ---
 
 func buildSingleAgent(req *ChatRequest) *agent.Agent {
-	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
+	chat := larkadapter.NewLarkChatModel(req.APIKey, req.BaseURL, req.Model)
 	return agent.New(chat,
 		agent.WithName("test-server-agent"),
 		agent.WithModelName(req.Model),
@@ -223,7 +223,7 @@ func buildSingleAgent(req *ChatRequest) *agent.Agent {
 
 // buildTransferEntry returns the entry agent (triage); use runner.NewRunner(entry, ...) with WithVarStore.
 func buildTransferEntry(req *ChatRequest) *agent.Agent {
-	chat := arkdoubao.NewArkChatModel(req.APIKey, req.BaseURL, req.Model)
+	chat := larkadapter.NewLarkChatModel(req.APIKey, req.BaseURL, req.Model)
 
 	triage := agent.New(chat,
 		agent.WithName("triage"),
@@ -286,7 +286,7 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 		chatReq.resolveDefaults()
 
 		if chatReq.APIKey == "" {
-			c.JSON(400, map[string]string{"error": "api_key is required (pass in request or set DOUBAO_API_KEY / ARK_API_KEY env)"})
+			c.JSON(400, map[string]string{"error": "api_key is required (pass in request or set LARK_API_KEY / DOUBAO_API_KEY / ARK_API_KEY env)"})
 			return
 		}
 
@@ -330,6 +330,15 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 		eventID := 0
 		var lastVarStore *variable.VarStore
 		for ev := range ch {
+			if ev.Type == event.EventCallLLMStart {
+				if p := ev.CallLLMStart(); p != nil {
+					logger.Info("call_llm_start system prompt",
+						"step", ev.Step,
+						"model", p.Model,
+						"system_prompt", p.SystemPrompt,
+					)
+				}
+			}
 			if qe := ev.QueryEnd(); qe != nil && qe.Outcome != nil {
 				lastVarStore = qe.Outcome.VarStore
 			}
