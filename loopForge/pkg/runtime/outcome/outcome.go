@@ -31,5 +31,8 @@ type RunMetrics struct {
 	OutputTokens int64   `json:"output_tokens"`
 	TotalTokens  int64   `json:"total_tokens"`
 	TotalCostUSD float64 `json:"total_cost_usd"`
-	Steps        int     `json:"steps"`
+	// Steps counts LLM calls (one Generate/stream round-trip per loop iteration).
+	// When using pkg/runner with handoffs, the final RuntimeOutcome sums Steps
+	// across all agents in the transfer chain (see LoopState.AccumulatedMetrics).
+	Steps int `json:"steps"`
 }

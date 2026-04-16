@@ -1,7 +1,7 @@
 package variable
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"strings"
 	"sync"
 	"testing"
@@ -43,12 +43,12 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	s.Define("a", "da")
 	s.Set("b", 42, WithDescription("db"))
 	snap := s.Snapshot()
-	data, err := json.Marshal(snap)
+	data, err := sonic.Marshal(snap)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var snap2 StoreSnapshot
-	if err := json.Unmarshal(data, &snap2); err != nil {
+	if err := sonic.Unmarshal(data, &snap2); err != nil {
 		t.Fatal(err)
 	}
 	r := Import(&snap2)
@@ -60,12 +60,12 @@ func TestSnapshotRoundTrip(t *testing.T) {
 func TestVarStoreJSON(t *testing.T) {
 	s := New()
 	s.Set("k", "v")
-	data, err := json.Marshal(s)
+	data, err := sonic.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var s2 VarStore
-	if err := json.Unmarshal(data, &s2); err != nil {
+	if err := sonic.Unmarshal(data, &s2); err != nil {
 		t.Fatal(err)
 	}
 	v, ok := s2.Get("k")

@@ -75,7 +75,9 @@ func (a *Agent) resolveCallOptions(req *request.RuntimeRequest) ([]model.CallOpt
 
 // buildMessages constructs the initial message slice from either inherited
 // conversation history or fresh system + user messages.
-func (a *Agent) buildMessages(inheritedMsgs []*model.Message, req *request.RuntimeRequest) []*model.Message {
+// resolvedUser is the user message content after optional builder and VarStore
+// substitution; it is ignored when inheritedMsgs is non-nil.
+func (a *Agent) buildMessages(inheritedMsgs []*model.Message, req *request.RuntimeRequest, resolvedUser string) []*model.Message {
 	if inheritedMsgs != nil {
 		return replaceSystemMessage(inheritedMsgs, a.SystemInstructions)
 	}
@@ -83,8 +85,24 @@ func (a *Agent) buildMessages(inheritedMsgs []*model.Message, req *request.Runti
 	if strings.TrimSpace(a.SystemInstructions) != "" {
 		msgs = append(msgs, &model.Message{Role: model.RoleSystem, Content: strings.TrimSpace(a.SystemInstructions)})
 	}
-	msgs = append(msgs, &model.Message{Role: model.RoleUser, Content: req.UserMessage})
+	msgs = append(msgs, &model.Message{Role: model.RoleUser, Content: resolvedUser})
 	return msgs
+}
+
+// replaceFirstUserMessage returns a copy of msgs with the first user message
+// content replaced.
+func replaceFirstUserMessage(msgs []*model.Message, content string) []*model.Message {
+	out := make([]*model.Message, len(msgs))
+	copy(out, msgs)
+	for i := range out {
+		if out[i] != nil && out[i].Role == model.RoleUser {
+			nm := *out[i]
+			nm.Content = content
+			out[i] = &nm
+			break
+		}
+	}
+	return out
 }
 
 // replaceSystemMessage returns a copy of msgs with the first system message

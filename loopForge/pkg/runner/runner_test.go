@@ -66,6 +66,10 @@ func TestRunner_Transfer_HappyPath(t *testing.T) {
 	if qe.Outcome.FinalText != "The answer is 42." {
 		t.Fatalf("FinalText=%q", qe.Outcome.FinalText)
 	}
+	// Triage: 1 LLM call (transfer tool). Expert: 1 LLM call (final text).
+	if qe.Outcome.Metrics.Steps != 2 {
+		t.Fatalf("Metrics.Steps=%d, want 2 (one LLM call per hop)", qe.Outcome.Metrics.Steps)
+	}
 	chain := qe.Outcome.TransferChain
 	if len(chain) != 2 || chain[0] != "triage" || chain[1] != "expert" {
 		t.Fatalf("TransferChain=%v, want [triage expert]", chain)
@@ -140,6 +144,9 @@ func TestRunner_SingleAgent_NoTransfer(t *testing.T) {
 	}
 	if qe.Outcome.FinalText != "Just me." {
 		t.Fatalf("FinalText=%q", qe.Outcome.FinalText)
+	}
+	if qe.Outcome.Metrics.Steps != 1 {
+		t.Fatalf("Metrics.Steps=%d, want 1", qe.Outcome.Metrics.Steps)
 	}
 }
 

@@ -102,3 +102,11 @@ func WithVariable() Option {
 		a.Variable = true
 	}
 }
+
+// WithSystemPromptBuilder sets an optional callback that composes the system
+// prompt before {{name}} substitution from VarStore.
+func WithSystemPromptBuilder(fn SystemPromptBuilder) Option {
+	return func(a *Agent) {
+		a.SystemPromptBuilder = fn
+	}
+}

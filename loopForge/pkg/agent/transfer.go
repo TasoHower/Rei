@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"fmt"
 	"strings"
 
@@ -116,7 +116,7 @@ func ExtractReason(argsJSON string) string {
 	var args struct {
 		Reason string `json:"reason"`
 	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+	if err := sonic.UnmarshalString(argsJSON, &args); err != nil {
 		return argsJSON
 	}
 	return args.Reason

@@ -517,6 +517,27 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
 
+    function indexOfLastUserBubbleRow() {
+      const kids = chatArea.children;
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const el = kids[i];
+        if (el.classList && el.classList.contains('bubble-row') && el.classList.contains('user')) return i;
+      }
+      return -1;
+    }
+
+    function shouldContinueAgentBubble(agentName) {
+      const key = agentName != null ? String(agentName) : '';
+      const kids = chatArea.children;
+      const afterUser = indexOfLastUserBubbleRow();
+      for (let i = kids.length - 1; i > afterUser; i--) {
+        const el = kids[i];
+        if (!el.classList || !el.classList.contains('bubble-row') || !el.classList.contains('agent')) continue;
+        return (el.dataset.agentName || '') === key;
+      }
+      return false;
+    }
+
     function addUserBubble(text) {
       const row = document.createElement('div');
       row.className = 'bubble-row user';
@@ -531,7 +552,9 @@
       if (currentAnswerBubble && currentAgentName === agentName) return;
       sealAgentBubble();
       const row = document.createElement('div');
-      row.className = 'bubble-row agent' + (lastSenderIsAgent ? ' continuation' : '');
+      const agentKey = agentName != null ? String(agentName) : '';
+      row.dataset.agentName = agentKey;
+      row.className = 'bubble-row agent' + (shouldContinueAgentBubble(agentName) ? ' continuation' : '');
       const label = agentName ? `<div class="agent-label">${escapeHtml(agentName)}</div>` : '';
       row.innerHTML = `<div class="avatar">A</div><div class="bubble streaming">${label}</div>`;
       chatArea.appendChild(row);

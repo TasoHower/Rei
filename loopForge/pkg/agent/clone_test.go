@@ -41,12 +41,14 @@ func TestClone_SliceIsolation(t *testing.T) {
 }
 
 func TestClone_ScalarCopy(t *testing.T) {
+	builder := func(SystemPromptBuildContext) (string, error) { return "x", nil }
 	original := &Agent{
-		Name:               "orig",
-		Description:        "desc",
-		ModelName:          "model-1",
-		SystemInstructions: "sys",
-		MaxSteps:           10,
+		Name:                "orig",
+		Description:         "desc",
+		ModelName:           "model-1",
+		SystemInstructions:  "sys",
+		MaxSteps:            10,
+		SystemPromptBuilder: builder,
 	}
 
 	cloned := original.Clone()
@@ -62,6 +64,9 @@ func TestClone_ScalarCopy(t *testing.T) {
 	}
 	if original.MaxSteps != 10 {
 		t.Fatalf("MaxSteps mutated: %d", original.MaxSteps)
+	}
+	if cloned.SystemPromptBuilder == nil {
+		t.Fatal("expected SystemPromptBuilder copied")
 	}
 }
 

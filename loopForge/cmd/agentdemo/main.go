@@ -16,7 +16,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"fmt"
 	"math"
 	"os"
@@ -99,7 +99,7 @@ func parseBinaryArgs(raw string) (a, b float64, err error) {
 		A float64 `json:"a"`
 		B float64 `json:"b"`
 	}
-	if err = json.Unmarshal([]byte(raw), &args); err != nil {
+	if err = sonic.UnmarshalString(raw, &args); err != nil {
 		return 0, 0, err
 	}
 	return args.A, args.B, nil

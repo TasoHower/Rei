@@ -1,7 +1,7 @@
 package agentsdk
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"fmt"
 	"strings"
 
@@ -146,10 +146,10 @@ func sdkToolCallArgumentsJSON(tc *sdkmodel.ToolCall) string {
 		if s, ok2 := raw.(string); ok2 {
 			return s
 		}
-		b, _ := json.Marshal(raw)
+		b, _ := sonic.Marshal(raw)
 		return string(b)
 	}
-	b, err := json.Marshal(tc.Parameters)
+	b, err := sonic.Marshal(tc.Parameters)
 	if err != nil {
 		return "{}"
 	}

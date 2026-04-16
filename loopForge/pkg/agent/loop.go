@@ -20,7 +20,8 @@ import (
 // standalone use.
 //
 // Returns an *InterceptedCall if a ToolInterceptor matched, or nil for
-// normal completion / error.
+// normal completion / error. On completion or terminal error, EventQueryEnd is
+// emitted last (after the final EventCallLLMEnd when an LLM round occurred).
 func (a *Agent) RunLoop(
 	ctx context.Context,
 	req *request.RuntimeRequest,
@@ -38,12 +39,19 @@ func (a *Agent) RunLoop(
 		}
 	}
 
-	emitQueryEnd := func(oc *outcome.RuntimeOutcome) {
-		emit(0, &event.QueryEndPayload{Outcome: oc})
-	}
+	// QueryEnd is always the last outbound event for this RunLoop invocation
+	// (after the final call_llm_end and any error payload). Transfer intercepts
+	// clear pendingQueryEnd before returning so the runner can continue the chain.
+	var pendingQueryEnd *outcome.RuntimeOutcome
+	var pendingQueryEndStep int
+	defer func() {
+		if pendingQueryEnd != nil {
+			emit(pendingQueryEndStep, &event.QueryEndPayload{Outcome: pendingQueryEnd})
+		}
+	}()
 
-	emitError := func(code, msg string) {
-		emit(0, &event.ErrorPayload{Code: code, Message: msg})
+	emitError := func(code, msg string, step int) {
+		emit(step, &event.ErrorPayload{Code: code, Message: msg})
 		oc := &outcome.RuntimeOutcome{
 			RunID:       runID,
 			Termination: outcome.TerminationError,
@@ -51,17 +59,18 @@ func (a *Agent) RunLoop(
 		if vstore != nil {
 			oc.VarStore = vstore
 		}
-		emitQueryEnd(oc)
+		pendingQueryEnd = oc
+		pendingQueryEndStep = step
 	}
 
 	// --- validation ---
 
 	if req == nil {
-		emitError("invalid_request", "request is nil")
+		emitError("invalid_request", "request is nil", 0)
 		return nil
 	}
 	if a.ChatModel == nil {
-		emitError("invalid_config", "Agent.ChatModel is nil")
+		emitError("invalid_config", "Agent.ChatModel is nil", 0)
 		return nil
 	}
 
@@ -84,16 +93,29 @@ func (a *Agent) RunLoop(
 
 	m, setupErr := a.bindModel(varTools...)
 	if setupErr != nil {
-		emitError(setupErr.Code, setupErr.Msg)
+		emitError(setupErr.Code, setupErr.Msg, 0)
 		return nil
 	}
 
-	// --- resolve runtime parameters ---
+	// --- initial messages ---
+
+	var msgs []*model.Message
+	var userTemplate string
+	var displayUser string
+	freshSession := inheritedMsgs == nil
+
+	if freshSession {
+		userTemplate = req.UserMessage
+		p0 := stringParamsFromVarStore(vstore)
+		displayUser = ReplaceDoubleBraceParams(userTemplate, p0)
+		msgs = a.buildMessages(nil, req, displayUser)
+	} else {
+		msgs = a.buildMessages(inheritedMsgs, req, "")
+	}
 
 	maxSteps := a.resolveMaxSteps(req)
 	opts, modelName := a.resolveCallOptions(req)
 	callCfg := model.ApplyCallOptions(opts...)
-	msgs := a.buildMessages(inheritedMsgs, req)
 
 	// --- metrics tracking ---
 
@@ -134,23 +156,51 @@ func (a *Agent) RunLoop(
 
 	if state == nil || !state.SuppressBookends {
 		emit(0, &event.StartPayload{})
-		emit(0, &event.QuestionPayload{UserMessage: req.UserMessage})
+		qm := req.UserMessage
+		if freshSession {
+			qm = displayUser
+		}
+		emit(0, &event.QuestionPayload{UserMessage: qm})
 	}
 
 	// --- main loop ---
 
 	var lastText string
 	for step := range maxSteps {
-		fullSystem := baseSystem
+		if freshSession {
+			userStep := ReplaceDoubleBraceParams(userTemplate, stringParamsFromVarStore(vstore))
+			msgs = replaceFirstUserMessage(msgs, userStep)
+		}
+
+		blockBeforeBuilder := ""
 		if a.Variable {
-			block := vstore.PromptBlock()
-			if block != "" {
-				if fullSystem != "" {
-					fullSystem = fullSystem + "\n\n" + block
-				} else {
-					fullSystem = block
-				}
+			blockBeforeBuilder = vstore.PromptBlock()
+		}
+
+		fullSystem := baseSystem
+		if a.SystemPromptBuilder != nil {
+			sb := SystemPromptBuildContext{
+				Ctx:                 ctx,
+				Request:             req,
+				VarStore:            vstore,
+				Agent:               a,
+				Step:                step,
+				BaseSystemPrompt:    baseSystem,
+				VariablePromptBlock: blockBeforeBuilder,
 			}
+
+			var err error
+
+			fullSystem, err = a.SystemPromptBuilder(sb)
+			if err != nil {
+				emitError("system_prompt_builder", err.Error(), step)
+				return nil
+			}
+		}
+
+		block := ""
+		if a.Variable {
+			block = vstore.PromptBlock()
 			log.Default().Debug("variables prompt block",
 				"agent", a.Name,
 				"run_id", runID,
@@ -159,6 +209,18 @@ func (a *Agent) RunLoop(
 				"var_count", vstore.Len(),
 			)
 		}
+		if block != "" {
+			if fullSystem != "" {
+				fullSystem = fullSystem + "\n\n" + block
+			} else {
+				fullSystem = block
+			}
+		}
+
+		if p := stringParamsFromVarStore(vstore); len(p) > 0 {
+			fullSystem = ReplaceDoubleBraceParams(fullSystem, p)
+		}
+
 		msgs = replaceSystemMessage(msgs, fullSystem)
 
 		emit(step, &event.CallLLMStartPayload{
@@ -171,7 +233,7 @@ func (a *Agent) RunLoop(
 		sr := consumeStream(ctx, m, msgs, opts, emit, step)
 		if sr.Err != nil {
 			emit(step, &event.CallLLMEndPayload{FinishReason: event.FinishError})
-			emitError("generate", sr.Err.Error())
+			emitError("generate", sr.Err.Error(), step)
 			return nil
 		}
 
@@ -197,9 +259,10 @@ func (a *Agent) RunLoop(
 			OutputTokens: sr.OutputTokens,
 		})
 
-		// No tool calls → model finished naturally.
+		// No tool calls → model finished naturally (call_llm_end already emitted).
 		if len(sr.ToolCalls) == 0 {
-			emitQueryEnd(buildOutcome(lastText, outcome.TerminationCompleted, step+1))
+			pendingQueryEnd = buildOutcome(lastText, outcome.TerminationCompleted, step+1)
+			pendingQueryEndStep = step
 			return nil
 		}
 
@@ -211,6 +274,7 @@ func (a *Agent) RunLoop(
 			for i := range sr.ToolCalls {
 				tc := sr.ToolCalls[i]
 				if a.ToolInterceptor(tc) {
+					pendingQueryEnd = nil
 					ic := &InterceptedCall{
 						ToolCall: tc,
 						Msgs:     msgs,
@@ -234,12 +298,16 @@ func (a *Agent) RunLoop(
 		invokeInfos := a.mergedToolInfos(varTools...)
 		toolMsgs, toolErr := executeToolCalls(ctx, invokeInfos, a.Executor, sr.ToolCalls, emit, step)
 		if toolErr != nil {
-			emitError("tool_exec", toolErr.Error())
+			emitError("tool_exec", toolErr.Error(), step)
 			return nil
 		}
 		msgs = append(msgs, toolMsgs...)
 	}
 
-	emitQueryEnd(buildOutcome(lastText, outcome.TerminationMaxSteps, maxSteps))
+	pendingQueryEnd = buildOutcome(lastText, outcome.TerminationMaxSteps, maxSteps)
+	pendingQueryEndStep = 0
+	if maxSteps > 0 {
+		pendingQueryEndStep = maxSteps - 1
+	}
 	return nil
 }

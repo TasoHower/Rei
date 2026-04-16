@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"fmt"
 	"testing"
 
@@ -75,7 +75,7 @@ func TestAgent_toolLoop_invokesHandle(t *testing.T) {
 					A float64 `json:"a"`
 					B float64 `json:"b"`
 				}
-				if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+				if err := sonic.UnmarshalString(argumentsJSON, &args); err != nil {
 					return "", err
 				}
 				return fmt.Sprintf("%.0f", args.A+args.B), nil

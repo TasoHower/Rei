@@ -73,6 +73,10 @@ type Agent struct {
 	// Variable enables var_set and [Variables] prompt injection for this agent.
 	Variable bool
 
+	// SystemPromptBuilder optionally composes the system prompt each step.
+	// If nil, RunLoop uses the default composition strategy.
+	SystemPromptBuilder SystemPromptBuilder
+
 	handoffs []*Agent
 }
 
@@ -109,6 +113,7 @@ func (a *Agent) Clone() *Agent {
 		copy(c.handoffs, a.handoffs)
 	}
 	c.Variable = a.Variable
+	c.SystemPromptBuilder = a.SystemPromptBuilder
 	return &c
 }
 

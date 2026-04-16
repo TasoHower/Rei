@@ -2,8 +2,8 @@ package variable
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"log/slog"
 	"sort"
 	"sync"
@@ -254,7 +254,7 @@ func (s *VarStore) PromptBlock() string {
 	b.WriteString("- Variables marked `<unset>` have been declared but not yet assigned. ")
 	b.WriteString("Call `var_set` to assign a value when you have determined the correct one.\n")
 	b.WriteString("- Variables prefixed with `const_` are **read-only** — they are injected by the system and cannot be modified via `var_set`.\n")
-	b.WriteString("- All other variables can be updated at any time using `var_set`.\n")
+	b.WriteString("- All other variables can be updated at any time using `var_set` (you may set several in one call; only include keys that change).\n")
 	b.WriteString("- You do not need to call any tool to read variables — their current values are shown below.\n\n")
 
 	b.WriteString("### Current values\n")
@@ -267,7 +267,7 @@ func (s *VarStore) PromptBlock() string {
 		} else {
 			// Marshal outside RLock: custom MarshalJSON must never run while holding
 			// VarStore's mutex (e.g. re-entering PromptBlock/Get would deadlock).
-			raw, err := json.Marshal(r.val)
+			raw, err := sonic.Marshal(r.val)
 			if err != nil {
 				b.WriteString(fmt.Sprintf("%q", fmt.Sprint(r.val)))
 			} else {
@@ -352,13 +352,13 @@ func (s *VarStore) MarshalJSON() ([]byte, error) {
 	if s == nil {
 		return []byte("null"), nil
 	}
-	return json.Marshal(s.Snapshot())
+	return sonic.Marshal(s.Snapshot())
 }
 
 // UnmarshalJSON implements json.Unmarshaler via Import.
 func (s *VarStore) UnmarshalJSON(data []byte) error {
 	var snap StoreSnapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
+	if err := sonic.Unmarshal(data, &snap); err != nil {
 		return err
 	}
 	n := Import(&snap)
