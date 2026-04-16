@@ -28,7 +28,6 @@ import (
 )
 
 const (
-	defaultBaseURL      = "https://ark.cn-beijing.volces.com/api/v3"
 	defaultModel        = "deepseek-v3-2-251201"
 	defaultSystemPrompt = `你是「参数赋值」测试助手（单 Agent 模式）。
 
@@ -65,7 +64,7 @@ func (r *ChatRequest) resolveDefaults() {
 		r.APIKey = firstNonEmpty(os.Getenv("LARK_API_KEY"), os.Getenv("DOUBAO_API_KEY"), os.Getenv("ARK_API_KEY"))
 	}
 	if r.BaseURL == "" {
-		r.BaseURL = firstNonEmpty(os.Getenv("LARK_BASE_URL"), os.Getenv("DOUBAO_BASE_URL"), defaultBaseURL)
+		r.BaseURL = firstNonEmpty(os.Getenv("LARK_BASE_URL"), os.Getenv("DOUBAO_BASE_URL"), larkadapter.DefaultBaseURL)
 	}
 	r.BaseURL = strings.TrimRight(strings.TrimSpace(r.BaseURL), "/")
 	if r.Model == "" {
@@ -210,8 +209,7 @@ func mathToolInfos() []*model.ToolInfo {
 // --- agent builders ---
 
 func buildSingleAgent(req *ChatRequest) *agent.Agent {
-	chat := larkadapter.NewLarkChatModel(req.APIKey, req.BaseURL, req.Model)
-	return agent.New(chat,
+	a := agent.New(nil,
 		agent.WithName("test-server-agent"),
 		agent.WithModelName(req.Model),
 		agent.WithMaxSteps(12),
@@ -219,13 +217,13 @@ func buildSingleAgent(req *ChatRequest) *agent.Agent {
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
 	)
+	runner.ApplyLarkFromConfig(a, req.APIKey, req.BaseURL, req.Model)
+	return a
 }
 
 // buildTransferEntry returns the entry agent (triage); use runner.NewRunner(entry, ...) with WithVarStore.
 func buildTransferEntry(req *ChatRequest) *agent.Agent {
-	chat := larkadapter.NewLarkChatModel(req.APIKey, req.BaseURL, req.Model)
-
-	triage := agent.New(chat,
+	triage := agent.New(nil,
 		agent.WithName("triage"),
 		agent.WithDescription("Analyzes the user's request and routes to the appropriate specialist."),
 		agent.WithModelName(req.Model),
@@ -238,8 +236,9 @@ Always call transfer to a specialist.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
 	)
+	runner.ApplyLarkFromConfig(triage, req.APIKey, req.BaseURL, req.Model)
 
-	mathExpert := agent.New(chat,
+	mathExpert := agent.New(nil,
 		agent.WithName("math_expert"),
 		agent.WithDescription("Solves math problems step by step using arithmetic tools (add, subtract, multiply, divide)."),
 		agent.WithModelName(req.Model),
@@ -252,8 +251,9 @@ Optional: var_set session_note when the user wants a preference remembered.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
 	)
+	mathExpert.ChatModel = triage.ChatModel
 
-	writer := agent.New(chat,
+	writer := agent.New(nil,
 		agent.WithName("writer"),
 		agent.WithDescription("Creates creative text, stories, poems, and other written content."),
 		agent.WithModelName(req.Model),
@@ -262,6 +262,7 @@ Optional: var_set session_note when the user wants a preference remembered.`),
 		agent.WithCallOptions(model.WithTemperature(0.7)),
 		agent.WithVariable(),
 	)
+	writer.ChatModel = triage.ChatModel
 
 	triage.AddHandoff(mathExpert, writer)
 	mathExpert.AddHandoff(triage)

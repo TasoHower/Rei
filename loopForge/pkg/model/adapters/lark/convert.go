@@ -1,6 +1,7 @@
 package lark
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -78,6 +79,89 @@ func oneArkMessage(m *lpmodel.Message) (*arkmodel.ChatCompletionMessage, error) 
 	}
 }
 
+// arkKeywordsRejectedByDoubao strips JSON Schema keys that Ark / Doubao chat
+// completions reject with 400 (e.g. InvalidParameter around function format).
+func arkStripUnsupportedSchemaKeywords(v interface{}) interface{} {
+	switch x := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(x))
+		for k, val := range x {
+			switch k {
+			case "additionalProperties", "patternProperties", "unevaluatedProperties":
+				continue
+			default:
+				out[k] = arkStripUnsupportedSchemaKeywords(val)
+			}
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(x))
+		for i, e := range x {
+			out[i] = arkStripUnsupportedSchemaKeywords(e)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// arkEnsurePropertyTypes adds a minimal "type" on property sub-schemas when
+// missing; Ark validators reject some tool definitions otherwise.
+func arkEnsurePropertyTypes(v interface{}) {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return
+	}
+	if props, ok := m["properties"].(map[string]interface{}); ok {
+		for _, pv := range props {
+			pm, ok := pv.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if _, has := pm["type"]; !has {
+				switch {
+				case pm["properties"] != nil:
+					pm["type"] = "object"
+				case pm["items"] != nil:
+					pm["type"] = "array"
+				default:
+					pm["type"] = "string"
+				}
+			}
+			arkEnsurePropertyTypes(pm)
+		}
+	}
+	if items, ok := m["items"].(map[string]interface{}); ok {
+		arkEnsurePropertyTypes(items)
+	}
+	if items, ok := m["items"].([]interface{}); ok {
+		for _, e := range items {
+			arkEnsurePropertyTypes(e)
+		}
+	}
+}
+
+func arkToolParametersForAPI(params map[string]interface{}) map[string]interface{} {
+	if params == nil {
+		return map[string]interface{}{"type": "object"}
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return params
+	}
+	var root interface{}
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return params
+	}
+	root = arkStripUnsupportedSchemaKeywords(root)
+	arkEnsurePropertyTypes(root)
+	out, ok := root.(map[string]interface{})
+	if !ok {
+		return params
+	}
+	return out
+}
+
 func toArkTools(tools []*lpmodel.ToolInfo) []*arkmodel.Tool {
 	if len(tools) == 0 {
 		return nil
@@ -87,10 +171,7 @@ func toArkTools(tools []*lpmodel.ToolInfo) []*arkmodel.Tool {
 		if t == nil {
 			continue
 		}
-		params := t.Parameters
-		if params == nil {
-			params = map[string]interface{}{"type": "object"}
-		}
+		params := arkToolParametersForAPI(t.Parameters)
 		out = append(out, &arkmodel.Tool{
 			Type: arkmodel.ToolTypeFunction,
 			Function: &arkmodel.FunctionDefinition{

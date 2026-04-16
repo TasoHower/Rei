@@ -71,3 +71,5 @@
 |------|------|
 | 2026-04-16 | 初稿：v0.5.2 小版本规划（Lark 命名 + volcengine-go-sdk）。 |
 | 2026-04-16 | 落地：`pkg/model/adapters/lark`，移除 `doubao`；demo / test-server / loopforged 环境与文档更新。 |
+| 2026-04-16 | **Bugfix（v0.5.2）**：`Runner` 在 `Agent.ChatModel == nil` 且环境变量存在 API Key 时，对每次 hop 的 clone 注入默认 **`LarkChatModel`**；导出 **`ApplyLarkFromConfig`**（请求或环境覆盖 key/base/model）。`test-server` 改为 `agent.New(nil, …)` + `ApplyLarkFromConfig`，默认 Base URL 与 **`lark.DefaultBaseURL`** 对齐。 |
+| 2026-04-16 | **Bugfix（Ark / 豆包 400）**：调用 Ark 前对 tool **`parameters` 做兼容处理**（去掉 `additionalProperties` / `patternProperties` / `unevaluatedProperties`，并为 `properties` 子项补全缺失的 **`type`**）；**`var_set`** schema 去掉 `additionalProperties: true`，为 **`value`** 补 `type: object`，避免 `Invalid function format: 'type'` / `InvalidParameter`。 |

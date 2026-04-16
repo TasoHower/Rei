@@ -34,6 +34,8 @@ var _ agent.Runnable = (*Runner)(nil)
 type RunOption func(*Runner)
 
 // NewRunner creates a Runner that starts execution from entryAgent.
+// If entryAgent.ChatModel is nil but LARK_API_KEY (or DOUBAO_API_KEY / ARK_API_KEY)
+// is set in the environment, Run wires a default LarkChatModel before each hop.
 func NewRunner(entryAgent *agent.Agent, opts ...RunOption) *Runner {
 	r := &Runner{
 		entryAgent:   entryAgent,
@@ -104,7 +106,9 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 				store = variable.New()
 			}
 			st := &agent.LoopState{VarStore: store}
-			r.entryAgent.RunLoop(ctx, req, ch, nil, st)
+			exec := r.entryAgent.Clone()
+			applyDefaultLarkIfNeeded(exec)
+			exec.RunLoop(ctx, req, ch, nil, st)
 		}
 	}()
 
@@ -161,6 +165,7 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 
 	for {
 		a := current.Clone()
+		applyDefaultLarkIfNeeded(a)
 		a.ExtraTools = agent.BuildTransferTools(current)
 		a.ToolInterceptor = agent.IsTransferTool
 		if p := agent.BuildTransferPrompt(current); p != "" {

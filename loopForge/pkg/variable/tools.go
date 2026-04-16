@@ -26,16 +26,16 @@ func VarSetTool(store *VarStore) *model.ToolInfo {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"updates": map[string]interface{}{
-					"type":                 "object",
-					"additionalProperties": true,
-					"description":          "Map from variable name to JSON value. Include only variables you are changing; leave others out.",
+					"type":        "object",
+					"description": "Map from variable name to JSON value. Include only variables you are changing; leave others out.",
 				},
 				"key": map[string]interface{}{
 					"type":        "string",
 					"description": "Legacy: single variable name (use `updates` for multiple keys).",
 				},
 				"value": map[string]interface{}{
-					"description": "Legacy: JSON value for `key` (ignored when `updates` is non-empty).",
+					"type":        "object",
+					"description": "Legacy: JSON object value for `key` (ignored when `updates` is non-empty).",
 				},
 			},
 		},
