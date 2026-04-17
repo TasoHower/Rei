@@ -38,6 +38,7 @@ func BootstrapToolInfos(ctx context.Context, profiles ...cfg.MCPServerProfile) (
 			applog.Default().Error("mcp: bootstrap connect failed",
 				"server_id", p.ID,
 				"transport", string(p.Transport),
+				"target", profileTarget(p),
 				"err", err,
 			)
 			stopAll()
@@ -54,6 +55,7 @@ func BootstrapToolInfos(ctx context.Context, profiles ...cfg.MCPServerProfile) (
 			applog.Default().Error("mcp: bootstrap list_tools failed",
 				"server_id", serverID,
 				"transport", string(p.Transport),
+				"target", profileTarget(p),
 				"err", err,
 			)
 			stopAll()
@@ -88,11 +90,34 @@ func BootstrapToolInfos(ctx context.Context, profiles ...cfg.MCPServerProfile) (
 			handle := func(ctx context.Context, argumentsJSON string) (string, error) {
 				return callMCPTool(ctx, sess, mcpName, argumentsJSON)
 			}
-			all = append(all, parts.ToToolInfo(handle))
+			info := parts.ToToolInfo(handle)
+			all = append(all, info)
+			// Models often emit protocol tool names (e.g. "add") while we expose
+			// prefixed names (e.g. "tm__add"). Register an alias under the raw MCP name when a prefix is set.
+			if strings.TrimSpace(p.ToolPrefix) != "" && info != nil && info.Name != mcpName {
+				dup := *info
+				dup.Name = mcpName
+				all = append(all, &dup)
+			}
 		}
 	}
 
 	return all, stopAll, nil
+}
+
+// profileTarget returns a log-safe connection target (HTTP URL or stdio argv).
+func profileTarget(p cfg.MCPServerProfile) string {
+	switch p.Transport {
+	case cfg.MCPTransportStreamableHTTP:
+		return strings.TrimSpace(p.URL)
+	case cfg.MCPTransportStdio:
+		if len(p.Command) == 0 {
+			return ""
+		}
+		return strings.Join(p.Command, " ")
+	default:
+		return ""
+	}
 }
 
 func listSessionTools(ctx context.Context, session *sdkmcp.ClientSession) ([]*sdkmcp.Tool, error) {

@@ -70,7 +70,8 @@
       margin: 0 auto;
       padding: 16px 20px;
       gap: 12px;
-      overflow: hidden;
+      min-height: 0;
+      overflow-x: hidden;
     }
 
     /* ── Config Panel ── */
@@ -95,8 +96,16 @@
     .config-toggle:hover { color: var(--text); }
     .config-toggle .arrow { transition: transform 0.2s; font-size: 12px; }
     .config-panel.open .arrow { transform: rotate(180deg); }
-    .config-body { display: none; padding: 0 16px 16px; }
+    .config-body {
+      display: none;
+      padding: 0 16px 16px;
+      max-height: min(62vh, 560px);
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
     .config-panel.open .config-body { display: block; }
+    .config-body::-webkit-scrollbar { width: 6px; }
+    .config-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .config-grid .full-width { grid-column: 1 / -1; }
     .field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-dim); margin-bottom: 4px; }
@@ -110,6 +119,28 @@
     .field textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
     .field .hint { font-size: 11px; color: var(--text-dim); margin-top: 3px; opacity: 0.7; }
     .field select option { background: var(--bg); color: var(--text); }
+
+    .mcp-mode-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 20px;
+      margin-top: 6px;
+    }
+    .mcp-mode-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .mcp-mode-row input[type="radio"] { accent-color: var(--accent); }
+    #mcpCustomFields { margin-top: 4px; }
+    .mcp-section-head {
+      padding-top: 10px;
+      margin-top: 8px;
+      border-top: 1px dashed var(--border);
+    }
 
     /* ── Mode selector ── */
     .mode-selector {
@@ -148,6 +179,7 @@
     /* ── Chat Area ── */
     #chatArea {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -407,19 +439,19 @@
   <div class="container">
     <div class="config-panel open" id="configPanel">
       <div class="config-toggle" onclick="toggleConfig()">
-        <span>Agent 配置</span>
+        <span>Agent 与 MCP 配置</span>
         <span class="arrow">▼</span>
       </div>
       <div class="config-body">
         <!-- mode selector -->
         <div class="mode-selector">
-          <div class="mode-btn active" id="modeSingle" onclick="setMode('single')">
+          <div class="mode-btn active" id="modeSingle" onclick="setMode('single'); saveConfig();">
             <div>Single Agent</div>
             <div class="mode-desc">单 Agent + 四则运算工具</div>
           </div>
-          <div class="mode-btn" id="modeTransfer" onclick="setMode('transfer')">
+          <div class="mode-btn" id="modeTransfer" onclick="setMode('transfer'); saveConfig();">
             <div>Transfer (Handoff)</div>
-            <div class="mode-desc">triage → math_expert / writer</div>
+            <div class="mode-desc">triage → math_expert（四则） / writer</div>
           </div>
         </div>
 
@@ -439,9 +471,52 @@
             <input id="cfgBaseURL" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3" />
             <div class="hint">留空使用默认地址</div>
           </div>
+
+          <div class="field full-width mcp-section-head">
+            <label>MCP Server</label>
+            <div class="mcp-mode-row">
+              <label><input type="radio" name="mcpMode" value="env" checked /> 服务端默认（环境变量 / 内置 URL）</label>
+              <label><input type="radio" name="mcpMode" value="off" /> 关闭 MCP</label>
+              <label><input type="radio" name="mcpMode" value="custom" /> 自定义（本页填写）</label>
+            </div>
+            <div class="hint">与 LLM 无关：连接远端 MCP；选「自定义」后展开下方字段。未展开时也可在本区域内滚动查看。</div>
+          </div>
+
+          <div id="mcpCustomFields" class="config-grid full-width" style="display:none;grid-column:1/-1;">
+            <div class="field">
+              <label>Server ID</label>
+              <input id="mcpId" type="text" placeholder="e.g. test-mcp" />
+            </div>
+            <div class="field">
+              <label>Transport</label>
+              <select id="mcpTransport">
+                <option value="streamable_http">streamable_http（HTTP URL）</option>
+                <option value="stdio">stdio（子进程命令）</option>
+              </select>
+            </div>
+            <div class="field full-width" id="mcpUrlField">
+              <label>MCP URL</label>
+              <input id="mcpUrl" type="text" placeholder="http://127.0.0.1:9089/mcp" />
+              <div class="hint">streamable_http 必填</div>
+            </div>
+            <div class="field full-width" id="mcpCommandField" style="display:none;">
+              <label>Command argv（每行一个参数，首行为可执行文件）</label>
+              <textarea id="mcpCommand" placeholder="/path/to/server&#10;--mcp-transport&#10;stdio" spellcheck="false"></textarea>
+              <div class="hint">stdio 必填；等价于 shell 的 argv 数组</div>
+            </div>
+            <div class="field">
+              <label>Tool prefix</label>
+              <input id="mcpToolPrefix" type="text" placeholder="tm__" />
+            </div>
+            <div class="field full-width">
+              <label>Allowlist（可选，逗号分隔 MCP 工具原名）</label>
+              <input id="mcpAllowlist" type="text" placeholder="list_collections, retrieve" />
+            </div>
+          </div>
+
           <div class="field full-width" id="systemPromptField">
             <label>System Prompt <span style="font-weight:400;color:var(--text-dim)">(仅 Single 模式)</span></label>
-            <textarea id="cfgSystemPrompt" placeholder="留空使用默认：参数赋值测试（仅 var_set，无计算器）"></textarea>
+            <textarea id="cfgSystemPrompt" placeholder="留空使用默认：var_set + MCP 四则运算（单 Agent）"></textarea>
           </div>
         </div>
       </div>
@@ -452,8 +527,8 @@
     </div>
 
     <div class="input-area">
-      <input id="messageInput" type="text" placeholder="输入要测试的赋值指令…"
-             value="【参数赋值】请看 [Variables]。请用 var_set 写入：session_note=&quot;单 Agent 第一轮&quot;，user_goal=&quot;验证 var_set 与参数池&quot;。写完后一句话确认。" />
+      <input id="messageInput" type="text" placeholder="例如：分步计算 (128+256)÷4×2，每步调用工具"
+             value="【四则运算测试】请分步计算 (128 + 256) ÷ 4 × 2，每一步用工具，最后给出结果。" />
       <button id="sendBtn" onclick="sendMessage()">发送</button>
     </div>
   </div>
@@ -470,11 +545,33 @@
     let currentMode = 'single';
 
     const defaultMessages = {
-      single: '【参数赋值】请看 [Variables]。请用 var_set 写入：session_note="单 Agent 第一轮"，user_goal="验证 var_set 与参数池"。写完后一句话确认。',
-      transfer: '【参数赋值】请转给 writer：用 var_set 写入 session_note="Transfer 由 writer 写入"，user_goal="多 Agent 下参数池"。然后一句话确认。'
+      single: '【四则运算测试】请分步计算 (128 + 256) ÷ 4 × 2，每一步用工具，最后给出结果。',
+      transfer: '【四则运算测试】请分步计算 (19 + 23) × 2 - 15 ÷ 3。交给算术专家逐步调用工具，最后一句话说明结果。'
     };
 
     const STORAGE_KEY = 'loopforge-config';
+
+    function syncMCPModeUI() {
+      const mode = document.querySelector('input[name="mcpMode"]:checked')?.value || 'env';
+      const box = document.getElementById('mcpCustomFields');
+      if (box) box.style.display = mode === 'custom' ? 'grid' : 'none';
+      syncMCPTransportUI();
+    }
+
+    function syncMCPTransportUI() {
+      const t = document.getElementById('mcpTransport')?.value || 'streamable_http';
+      const urlF = document.getElementById('mcpUrlField');
+      const cmdF = document.getElementById('mcpCommandField');
+      if (!urlF || !cmdF) return;
+      if (t === 'stdio') {
+        urlF.style.display = 'none';
+        cmdF.style.display = 'block';
+      } else {
+        urlF.style.display = 'block';
+        cmdF.style.display = 'none';
+      }
+    }
+
     function loadSavedConfig() {
       try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -482,20 +579,59 @@
         if (saved.model) document.getElementById('cfgModel').value = saved.model;
         if (saved.base_url) document.getElementById('cfgBaseURL').value = saved.base_url;
         if (saved.system_prompt) document.getElementById('cfgSystemPrompt').value = saved.system_prompt;
+        if (saved.mcp_mode) {
+          const r = document.querySelector(`input[name="mcpMode"][value="${saved.mcp_mode}"]`);
+          if (r) r.checked = true;
+        }
+        if (saved.mcp && typeof saved.mcp === 'object') {
+          const m = saved.mcp;
+          if (m.id != null) document.getElementById('mcpId').value = m.id;
+          if (m.transport) document.getElementById('mcpTransport').value = m.transport;
+          if (m.url != null) document.getElementById('mcpUrl').value = m.url;
+          if (Array.isArray(m.command)) document.getElementById('mcpCommand').value = m.command.join('\n');
+          else if (typeof m.command === 'string') document.getElementById('mcpCommand').value = m.command;
+          if (m.tool_prefix != null) document.getElementById('mcpToolPrefix').value = m.tool_prefix;
+          if (Array.isArray(m.allowlist)) document.getElementById('mcpAllowlist').value = m.allowlist.join(', ');
+          else if (m.allowlist != null) document.getElementById('mcpAllowlist').value = m.allowlist;
+        }
         if (saved.mode) setMode(saved.mode);
       } catch {}
+      syncMCPModeUI();
     }
     function saveConfig() { localStorage.setItem(STORAGE_KEY, JSON.stringify(getConfig())); }
     function getConfig() {
-      return {
+      const mode = document.querySelector('input[name="mcpMode"]:checked')?.value || 'env';
+      const o = {
         api_key: document.getElementById('cfgApiKey').value.trim(),
         model: document.getElementById('cfgModel').value.trim(),
         base_url: document.getElementById('cfgBaseURL').value.trim(),
         system_prompt: document.getElementById('cfgSystemPrompt').value.trim(),
         mode: currentMode,
+        mcp_mode: mode,
       };
+      if (mode === 'custom') {
+        o.mcp = {
+          id: document.getElementById('mcpId').value.trim(),
+          transport: document.getElementById('mcpTransport').value,
+          url: document.getElementById('mcpUrl').value.trim(),
+          command: document.getElementById('mcpCommand').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean),
+          tool_prefix: document.getElementById('mcpToolPrefix').value.trim(),
+          allowlist: document.getElementById('mcpAllowlist').value.split(',').map(s => s.trim()).filter(Boolean),
+        };
+      }
+      return o;
     }
     loadSavedConfig();
+
+    document.querySelectorAll('input[name="mcpMode"]').forEach(el => {
+      el.addEventListener('change', () => { syncMCPModeUI(); saveConfig(); });
+    });
+    document.getElementById('mcpTransport').addEventListener('change', () => { syncMCPTransportUI(); saveConfig(); });
+    ['mcpId', 'mcpUrl', 'mcpCommand', 'mcpToolPrefix', 'mcpAllowlist'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', saveConfig);
+      if (el) el.addEventListener('blur', saveConfig);
+    });
 
     function setMode(mode) {
       currentMode = mode;
@@ -609,6 +745,20 @@
       if (!message) return;
       const cfg = getConfig();
       if (!cfg.api_key) { alert('请先填写 API Key'); return; }
+      if (cfg.mcp_mode === 'custom') {
+        const t = document.getElementById('mcpTransport').value;
+        if (t === 'streamable_http' && !document.getElementById('mcpUrl').value.trim()) {
+          alert('自定义 MCP：请填写 MCP URL（streamable_http）');
+          return;
+        }
+        if (t === 'stdio') {
+          const argv = document.getElementById('mcpCommand').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+          if (argv.length === 0) {
+            alert('自定义 MCP stdio：请填写命令，每行一个参数（首行为可执行文件路径）');
+            return;
+          }
+        }
+      }
       saveConfig();
 
       emptyState?.remove();
@@ -624,8 +774,15 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, ...cfg }),
-      }).then(response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      }).then(async response => {
+        if (!response.ok) {
+          let msg = `HTTP ${response.status}`;
+          try {
+            const j = await response.json();
+            if (j.error) msg = j.error;
+          } catch {}
+          throw new Error(msg);
+        }
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';

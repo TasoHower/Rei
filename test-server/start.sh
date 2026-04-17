@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 ADDR="${ADDR:-:8191}"
 PORT="${ADDR##*:}"
 
-# Seraglf MCP defaults to http://127.0.0.1:8080/mcp inside the binary; override LOOPFORGE_MCP_TEST_URL or set TEST_SERVER_DISABLE_MCP=1 to skip.
+# test-mcp defaults to http://127.0.0.1:9089/mcp inside the binary; override LOOPFORGE_MCP_TEST_URL or set TEST_SERVER_DISABLE_MCP=1 to skip.
 
 echo "==> building test-server ..."
 go build -o ./bin/test-server .

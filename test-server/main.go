@@ -19,6 +19,7 @@ import (
 
 	"loopforge/pkg/agent"
 	"loopforge/pkg/log"
+	"loopforge/pkg/mcp/cfg"
 	"loopforge/pkg/model"
 	larkadapter "loopforge/pkg/model/adapters/lark"
 	"loopforge/pkg/runner"
@@ -28,17 +29,13 @@ import (
 )
 
 const (
-	defaultModel        = "deepseek-v3-2-251201"
-	defaultSystemPrompt = `你是「参数赋值」测试助手（单 Agent 模式）。
+	defaultModel = "deepseek-v3-2-251201"
+	defaultSystemPrompt = `You are the loopForge test assistant (single-agent mode).
 
-你的唯一可调工具是 var_set：用于给共享变量赋值。系统提示末尾的 [Variables] 块列出当前会话变量：
-- 以 const_ 开头的键为只读，禁止对它们调用 var_set。
-- 显示为 <unset> 的键需要你在理解用户意图后填入合理值。
+Shared variables appear in a [Variables] block at the end of the system prompt. Keys starting with const_ are read-only; never call var_set on them.
+Use var_set to write user-requested values for writable keys. When MCP arithmetic tools are available (names may be prefixed), call them for every numeric step; do not compute mentally.
 
-规则：
-1. 用户要求赋值时，必须实际调用 var_set（每个键一次或合并逻辑由你决定，但要能在工具调用中看到）。
-2. 赋值用简洁中文或用户指定语言即可；不要编造与用户明显无关的长文。
-3. 完成后用一两句话向用户确认已写入的键与含义。`
+After finishing, reply briefly and confirm what you set or computed.`
 )
 
 // ChatRequest is the JSON body for POST /api/chat.
@@ -50,6 +47,10 @@ type ChatRequest struct {
 	Model        string `json:"model,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`
 	Mode         string `json:"mode,omitempty"` // "single" (default) or "transfer"
+
+	// MCPMode: "env" (default) uses server env defaults; "off" disables MCP; "custom" uses MCP.
+	MCPMode string     `json:"mcp_mode,omitempty"`
+	MCP     *MCPFields `json:"mcp,omitempty"`
 }
 
 // SSEEvent is the JSON payload written as SSE data for each RuntimeEvent.
@@ -208,9 +209,8 @@ func mathToolInfos() []*model.ToolInfo {
 
 // --- agent builders ---
 
-func buildSingleAgent(req *ChatRequest) *agent.Agent {
+func buildSingleAgent(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffix string) *agent.Agent {
 	sys := req.SystemPrompt
-	mcpProf, mcpSuffix := mcpAgentExtras()
 	if mcpSuffix != "" {
 		sys += mcpSuffix
 	}
@@ -231,39 +231,48 @@ func buildSingleAgent(req *ChatRequest) *agent.Agent {
 }
 
 // buildTransferEntry returns the entry agent (triage); use runner.NewRunner(entry, ...) with WithVarStore.
-func buildTransferEntry(req *ChatRequest) *agent.Agent {
+func buildTransferEntry(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffix string) *agent.Agent {
 	triage := agent.New(nil,
 		agent.WithName("triage"),
 		agent.WithDescription("Analyzes the user's request and routes to the appropriate specialist."),
 		agent.WithModelName(req.Model),
 		agent.WithMaxSteps(20),
 		agent.WithSystemInstructions(`You are a triage agent. Route to one specialist (do not answer the user yourself):
-- Math / arithmetic / 计算 → transfer to "math_expert"
-- Writing / creative / 创作 → transfer to "writer"
-- Session variables / var_set / 参数赋值 / [Variables] / 写入变量 → transfer to "writer" (writer handles var_set + reply)
+- Arithmetic, math, or step-by-step calculation → transfer to "math_expert"
+- Writing or creative content → transfer to "writer"
+- Session variables, var_set, or [Variables] updates → transfer to "writer"
 Always call transfer to a specialist.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
 	)
 	runner.ApplyLarkFromConfig(triage, req.APIKey, req.BaseURL, req.Model)
 
-	mathExpert := agent.New(nil,
+	mathSys := `You are the arithmetic specialist (math_expert). Call tools for every numeric step; never compute mentally.
+When MCP arithmetic tools are listed (names may be prefixed), use only those for calculations. If no MCP server is attached, use the built-in tools add, subtract, multiply, divide.
+Chain steps: feed each tool output as the next input when needed.
+Optional: var_set session_note only if the user explicitly asks to store a preference.`
+	if mcpSuffix != "" {
+		mathSys += mcpSuffix
+	}
+
+	mathOpts := []agent.Option{
 		agent.WithName("math_expert"),
-		agent.WithDescription("Solves math problems step by step using arithmetic tools (add, subtract, multiply, divide)."),
+		agent.WithDescription("Performs arithmetic via MCP tools (when configured) or built-in add/subtract/multiply/divide."),
 		agent.WithModelName(req.Model),
 		agent.WithMaxSteps(20),
-		agent.WithToolInfos(mathToolInfos()),
-		agent.WithSystemInstructions(`You are a math expert. You have four arithmetic tools: add, subtract, multiply, divide.
-You MUST call tools for every calculation step. Never compute in your head.
-When multiple steps depend on previous results, call them one step at a time.
-Optional: var_set session_note when the user wants a preference remembered.`),
+		agent.WithSystemInstructions(mathSys),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
-	)
+	}
+	if len(mcpProf) > 0 {
+		mathOpts = append(mathOpts, agent.WithMCPServerProfiles(mcpProf...))
+	} else {
+		mathOpts = append(mathOpts, agent.WithToolInfos(mathToolInfos()))
+	}
+	mathExpert := agent.New(nil, mathOpts...)
 	mathExpert.ChatModel = triage.ChatModel
 
 	writerSys := `You are a creative writer. When the user asks for 参数赋值 / var_set / [Variables], use var_set to fill session_note and user_goal as requested, then reply briefly. For normal creative requests, write as usual; you may still use var_set if the user wants session fields updated.`
-	mcpProf, mcpSuffix := mcpAgentExtras()
 	if mcpSuffix != "" {
 		writerSys += mcpSuffix
 	}
@@ -304,6 +313,12 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 
 		chatReq.resolveDefaults()
 
+		mcpProf, mcpSuffix, err := chatReq.resolveMCP()
+		if err != nil {
+			c.JSON(400, map[string]string{"error": err.Error()})
+			return
+		}
+
 		if chatReq.APIKey == "" {
 			c.JSON(400, map[string]string{"error": "api_key is required (pass in request or set LARK_API_KEY / DOUBAO_API_KEY / ARK_API_KEY env)"})
 			return
@@ -311,8 +326,10 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 
 		logger.Info("chat request received",
 			"mode", chatReq.Mode,
+			"mcp_mode", chatReq.MCPMode,
 			"model", chatReq.Model,
 			"session_id", chatReq.SessionID,
+			"mcp_servers", len(mcpProf),
 		)
 
 		sessionID := chatReq.SessionID
@@ -325,13 +342,13 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 		var ag agent.Runnable
 		switch chatReq.Mode {
 		case "transfer":
-			ag = runner.NewRunner(buildTransferEntry(&chatReq),
+			ag = runner.NewRunner(buildTransferEntry(&chatReq, mcpProf, mcpSuffix),
 				runner.WithMaxTransfers(10),
 				runner.WithLogger(log.Default()),
 				runner.WithVarStore(vstore),
 			)
 		default:
-			ag = runner.NewRunner(buildSingleAgent(&chatReq),
+			ag = runner.NewRunner(buildSingleAgent(&chatReq, mcpProf, mcpSuffix),
 				runner.WithLogger(log.Default()),
 				runner.WithVarStore(vstore),
 			)
