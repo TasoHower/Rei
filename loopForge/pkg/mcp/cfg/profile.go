@@ -17,6 +17,8 @@ type MCPServerProfile struct {
 	Env        map[string]string
 	Headers    map[string]string
 	ToolPrefix string
+	// ToolAllowlist, if non-empty, restricts which MCP tool names (protocol-side) are exposed.
+	ToolAllowlist []string
 }
 
 // MCPMappedTool maps an MCP tool listing entry to an exposed tool name.

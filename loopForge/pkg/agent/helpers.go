@@ -1,38 +1,64 @@
 package agent
 
 import (
+	"context"
 	"strings"
 
 	lferrors "loopforge/pkg/errors"
+	"loopforge/pkg/mcp"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/request"
 	"loopforge/pkg/tool"
 )
 
-// mergedToolInfos returns ToolInfos + ExtraTools + extraRuntime in the same
+// mergedToolInfos returns ToolInfos + mcpToolInfos + ExtraTools + extraRuntime in the same
 // order as bindModel uses for WithTools. Use this list when resolving tool
 // execution (tool.Invoke) so names registered only on ExtraTools/runtime
 // extras (e.g. var_set) still match.
 func (a *Agent) mergedToolInfos(extraRuntime ...*model.ToolInfo) []*model.ToolInfo {
-	nExtra := len(a.ExtraTools) + len(extraRuntime)
-	if nExtra == 0 {
-		return a.ToolInfos
+	n := len(a.ToolInfos) + len(a.mcpToolInfos) + len(a.ExtraTools) + len(extraRuntime)
+	if n == 0 {
+		return nil
 	}
-	merged := make([]*model.ToolInfo, 0, len(a.ToolInfos)+nExtra)
+	merged := make([]*model.ToolInfo, 0, n)
 	merged = append(merged, a.ToolInfos...)
+	merged = append(merged, a.mcpToolInfos...)
 	merged = append(merged, a.ExtraTools...)
 	merged = append(merged, extraRuntime...)
 	return merged
 }
 
+func (a *Agent) resetMCPSession() {
+	if a.mcpStop != nil {
+		a.mcpStop()
+		a.mcpStop = nil
+	}
+	a.mcpToolInfos = nil
+}
+
 // bindModel merges ExtraTools and optional extraRuntimeTools with ToolInfos,
-// validates bindings, and returns a tool-bound model ready for streaming.
-func (a *Agent) bindModel(extraRuntimeTools ...*model.ToolInfo) (model.ToolCallingChatModel, *lferrors.SetupError) {
+// bootstraps MCP tools when MCPServerProfiles is set, validates bindings, and
+// returns a tool-bound model ready for streaming.
+func (a *Agent) bindModel(ctx context.Context, extraRuntimeTools ...*model.ToolInfo) (model.ToolCallingChatModel, *lferrors.SetupError) {
+	a.resetMCPSession()
+
+	if len(a.MCPServerProfiles) > 0 {
+		infos, stop, err := mcp.BootstrapToolInfos(ctx, a.MCPServerProfiles...)
+		if err != nil {
+			return nil, lferrors.NewSetupError("invalid_config", err.Error())
+		}
+		a.mcpStop = stop
+		a.mcpToolInfos = infos
+	}
+
 	allTools := a.mergedToolInfos(extraRuntimeTools...)
 
-	// Validate only the agent's own tools (ExtraTools have no Handle by design).
-	if len(a.ToolInfos) > 0 {
-		if err := tool.ValidateBindings(a.ToolInfos, a.Executor); err != nil {
+	toValidate := make([]*model.ToolInfo, 0, len(a.ToolInfos)+len(a.mcpToolInfos))
+	toValidate = append(toValidate, a.ToolInfos...)
+	toValidate = append(toValidate, a.mcpToolInfos...)
+	if len(toValidate) > 0 {
+		if err := tool.ValidateBindings(toValidate, a.Executor); err != nil {
+			a.resetMCPSession()
 			return nil, lferrors.NewSetupError("invalid_config", err.Error())
 		}
 	}
@@ -40,6 +66,7 @@ func (a *Agent) bindModel(extraRuntimeTools ...*model.ToolInfo) (model.ToolCalli
 	if len(allTools) > 0 {
 		m, err := a.ChatModel.WithTools(allTools)
 		if err != nil {
+			a.resetMCPSession()
 			return nil, lferrors.NewSetupError("tool_bind", err.Error())
 		}
 		return m, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"loopforge/pkg/model"
+	"loopforge/pkg/mcp/cfg"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
@@ -46,6 +47,11 @@ type LoopState struct {
 // Transfer (handoff): call AddHandoff to register other Agent instances as
 // allowed transfer targets. Use Runner (pkg/runner.NewRunner) to execute the
 // agent graph — it automatically handles the transfer loop and per-run cloning.
+//
+// MCP: set MCPServerProfiles (via [WithMCPServerProfiles]) so each [RunLoop]
+// bootstraps tools from tools/list and merges them after ToolInfos; sessions are
+// closed when the run ends. Alternatively use [AttachMCP] + [WithToolInfos] for
+// explicit control.
 type Agent struct {
 	Name               string
 	Description        string // human-readable summary; surfaced in transfer tool descriptions
@@ -54,6 +60,14 @@ type Agent struct {
 	ChatModel          model.ToolCallingChatModel
 	ToolInfos          []*model.ToolInfo
 	Executor           tool.ToolExecutor
+
+	// MCPServerProfiles lists MCP servers to connect on each run. When non-empty,
+	// RunLoop calls [loopforge/pkg/mcp.BootstrapToolInfos] with the request context
+	// and appends discovered tools (prefixed names, MCP Handles) after ToolInfos.
+	MCPServerProfiles []cfg.MCPServerProfile `json:"-"`
+
+	mcpStop      func()
+	mcpToolInfos []*model.ToolInfo `json:"-"`
 
 	MaxSteps int
 	// CallOptions are passed to every Generate (e.g. model.WithTemperature);
@@ -112,6 +126,12 @@ func (a *Agent) Clone() *Agent {
 		c.handoffs = make([]*Agent, len(a.handoffs))
 		copy(c.handoffs, a.handoffs)
 	}
+	if a.MCPServerProfiles != nil {
+		c.MCPServerProfiles = make([]cfg.MCPServerProfile, len(a.MCPServerProfiles))
+		copy(c.MCPServerProfiles, a.MCPServerProfiles)
+	}
+	c.mcpStop = nil
+	c.mcpToolInfos = nil
 	c.Variable = a.Variable
 	c.SystemPromptBuilder = a.SystemPromptBuilder
 	return &c

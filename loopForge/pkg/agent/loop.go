@@ -69,6 +69,8 @@ func (a *Agent) RunLoop(
 		return nil
 	}
 
+	defer a.resetMCPSession()
+
 	if state != nil && state.VarStore != nil {
 		vstore = state.VarStore
 	} else {
@@ -82,7 +84,7 @@ func (a *Agent) RunLoop(
 		varTools = []*model.ToolInfo{variable.VarSetTool(vstore)}
 	}
 
-	m, setupErr := a.bindModel(varTools...)
+	m, setupErr := a.bindModel(ctx, varTools...)
 	if setupErr != nil {
 		emitError(setupErr.Code, setupErr.Msg, 0)
 		return nil
@@ -109,7 +111,7 @@ func (a *Agent) RunLoop(
 	buildMetrics := func(steps int) outcome.RunMetrics {
 		return a.runLoopMetrics(state, modelName, totalInputTokens, totalOutputTokens, steps)
 	}
-	
+
 	buildOutcome := func(finalText string, termination outcome.TerminationReason, steps int) *outcome.RuntimeOutcome {
 		return a.runLoopOutcome(runID, state, vstore, finalText, termination, buildMetrics(steps))
 	}
@@ -144,6 +146,7 @@ func (a *Agent) RunLoop(
 			MaxTokens:    callCfg.MaxTokens,
 			TopP:         callCfg.TopP,
 			SystemPrompt: fullSystem,
+			Tools:        toolSummariesForLLMEvent(a.mergedToolInfos(varTools...)),
 		})
 
 		sr := consumeStream(ctx, m, msgs, opts, emit, step)
@@ -201,6 +204,24 @@ func (a *Agent) RunLoop(
 		pendingQueryEndStep = maxSteps - 1
 	}
 	return nil
+}
+
+func toolSummariesForLLMEvent(infos []*model.ToolInfo) []event.LLMToolSummary {
+	if len(infos) == 0 {
+		return nil
+	}
+	out := make([]event.LLMToolSummary, 0, len(infos))
+	for _, ti := range infos {
+		if ti == nil {
+			continue
+		}
+		out = append(out, event.LLMToolSummary{
+			Name:        ti.Name,
+			Description: ti.Description,
+			Parameters:  ti.Parameters,
+		})
+	}
+	return out
 }
 
 // runLoopFullSystem builds system instructions for one step: optional builder,

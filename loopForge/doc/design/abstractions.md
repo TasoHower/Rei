@@ -1,232 +1,303 @@
 # loopForge 关键抽象结构
 
-> 本文档定义引擎对外与对内的 **契约型抽象**：**RuntimeAction（用户侧）**、**最小 MVP 心智（三种 action）**、**Agent 间信息交换**、**Tool**、**MCP**。实现时可映射为 Go 类型或 agent-sdk-go 已有类型；字段以 **英文** 命名为准。  
-> 与业务流程细节见 `multi-agent-engine.md`；系统拓扑见 `architecture.md`。
+> 本文档描述仓库 **当前实现** 中的契约与分层，并给出 **与源码一致的代码与结构示例**（代码块内为英文标识符与注释）。  
+> 愿景与路线图见 `multi-agent-engine.md`；事件与现网对齐见 `data-fusion.md`；MCP 与 Ark schema 见 `mcp-tool-unification.md`。
+
+---
+
+## 0. 总览：包与调用方向
+
+```
+                    +------------------+
+                    |  HTTP / CLI /    |
+                    |  test-server     |
+                    +--------+---------+
+                             | *request.RuntimeRequest
+                             v
+                    +--------+---------+
+                    |  pkg/runner      |  Run() -> chan *event.RuntimeEvent
+        handoffs    |  (optional)      |
+        +---------->|                  |
+        |           +--------+---------+
+        |                    |
+        |                    | clones *agent.Agent per hop (transfer)
+        v                    v
++------------------+  +------+-----------+
+| *agent.Agent     |  | bindModel:       |
+| RunLoop / Stream |  | ToolInfos +      |
+| tool.Invoke      |  | mcpToolInfos +   |
+|                  |  | ExtraTools       |
++------------------+  +------------------+
+        |                        ^
+        |                        | MCPServerProfiles
+        v                        | -> mcp.BootstrapToolInfos
++------------------+      +------+--------+
+| pkg/model        |      | pkg/mcp       |
+| ToolCallingChat  |      | + pkg/mcp/cfg |
++------------------+      +---------------+
+        |
+        v
++------------------+
+| pkg/tool.Invoke  |
++------------------+
+```
+
+**`WithVariable`**：`RunLoop` 创建或复用 **`variable.VarStore`**，注入 **`var_set`**（经 **`tool.Invoke`**）；**`{{key}}`** 替换见 **`pkg/agent/brace_params.go`**。
+
+**调试 MCP（不经 Agent）**：`loopforge/debug` → `Dial` → `Ping` / `ListTools` / `CallTool`，与 **`pkg/mcp.ConnectClientSession`** 复用连接逻辑。
 
 ---
 
 ## 1. 命名与分层
 
-| 层次 | 含义 |
-|------|------|
-| **User boundary** | 人类或上游系统通过 **Runtime API**（HTTP/CLI 等）与引擎交互 |
-| **Agent boundary** | 多个 **Run** / **Agent 实例** 之间通过 **Spawn** 或 **Network** 交换结构化信息 |
-| **Tool boundary** | 模型通过 **ToolCall** 调用；实现侧区分 **local**、**builtin**（如 spawn）、**MCP** |
-| **MCP boundary** | 与 **MCP Server** 的会话、工具发现、RPC 调用 |
+| 层次 | 含义 | 代码落点 |
+|------|------|----------|
+| **Runtime boundary** | 一次用户输入对应一次 **Run**；对外为 **事件流** + **最终 Outcome** | `pkg/runtime/request`、`pkg/runtime/event`、`pkg/runtime/outcome` |
+| **Execution boundary** | **Runnable**：`Run` → `chan`；**Runner** 负责 transfer 与指标汇总 | `pkg/agent`、`pkg/runner` |
+| **Model boundary** | Chat 模型、消息、`ToolInfo` schema、`Stream` | `pkg/model`、`pkg/model/types`、`pkg/model/adapters/*` |
+| **Tool boundary** | `tool_calls` → **`tool.Invoke`** | `pkg/tool` |
+| **Variable boundary** | 会话级 **`VarStore`**、`var_set` 工具、`{{name}}` 替换、`[Variables]` 注入 | `pkg/variable` + **`agent.WithVariable`** |
 
 ---
 
-## 2. 最小内核与 MVP 心智（外部参考融合）
+## 2. `Runnable`、`Runner` 与事件消费（示例）
 
-本节把「极简可演示」的 Agent 模型与本文其余 **契约字段** 对齐；实现栈默认 **agent-sdk-go** 的 `runner` / `tool`。
-
-### 2.1 两个本质（最小必要能力）
-
-| # | 能力 | 本质（一句话） | loopForge 落点 |
-|---|------|----------------|----------------|
-| **1** | **Skill（可执行层）** | **MCP + Tool Registry**：发现远端能力 → 映射成 **具名 tool** → 与本地函数 **同一套调用面** | `internal/mcp/` + `ToolRegistry`；指令类 **`SKILL.md`** 仍通过 **注入 prompt** 补充，**不**替代 MCP 发现 |
-| **2** | **动态子 Agent（Spawn）** | **LLM 决策 → 生成子目标 → 启动新的 agent loop → 结果回注**；与 Claude Code 类 **sub-agent** 同构 | **递归** `runner.Run`；结构化契约见 **§4** `SpawnSpec` / `SpawnResult` |
-
-**不做的事（demo 先别碰）**：复杂 DAG 工作流、一上来就做重型 **多 Agent 协调编排**（先 **单主循环 + spawn** 即可）。
-
-### 2.2 三种 Action（概念上的一步决策）
-
-外部参考把一步决策压成 **三类**，足够讲清 **Agent loop**：
-
-| `action.Type` | 含义 | 典型实现方式（与 SDK 对齐） |
-|---------------|------|-----------------------------|
-| **`tool`** | 调已注册工具（含 MCP） | LLM 返回 `tool_calls` → `ToolRegistry` 分发 |
-| **`spawn_agent`** | 子任务复杂，起 **子 loop** | 内置 `spawn_subagent` 或解析结构化输出 → `Spawner` |
-| **`finish`** | 收束，向用户返回答案 | 无更多 tool call、或显式 `stop` / 自然结束条件 |
-
-概念上存在一个 **Planner**（通常是 **同一次 LLM 调用** 的产出），不必单独进程；若教学/面试需要，可抽 **接口** 便于单测（见 §2.4）。
-
-### 2.3 概念循环伪代码
+**接口**（`pkg/agent/interface.go`）：
 
 ```go
-// Pseudocode: conceptual loop only — wire to agent-sdk-go runner in production.
-for step := 0; step < maxSteps; step++ {
-	action := planner.Plan(ctx) // one LLM turn + parse
+type Runnable interface {
+	Run(ctx context.Context, req *request.RuntimeRequest) <-chan *event.RuntimeEvent
+}
+```
 
-	switch action.Type {
+**典型用法**：用 **`runner.NewRunner`** 包装入口 Agent，从 channel 读事件直到 **`query_end`**（payload 内嵌 **`RuntimeOutcome`**）或 **`error`**。
 
-	case "tool":
-		result := toolRegistry.Call(action.Tool, action.Input)
-		ctx.AddObservation(result)
+```go
+r := runner.NewRunner(entryAgent,
+	runner.WithMaxTransfers(10),
+	runner.WithVarStore(sharedStore), // optional; nil -> new store per run
+)
 
-	case "spawn_agent":
-		subResult := spawnAgent(action.Prompt, action.AllowedTools)
-		ctx.AddObservation(subResult)
+ch := r.Run(ctx, &request.RuntimeRequest{
+	SessionID:   "sess-1",
+	UserMessage: "Hello",
+	RunMode:     request.RunModeSingleAgent,
+	Options:     request.RuntimeOptions{Model: "..."},
+})
 
-	case "finish":
-		return action.Result, nil
+for ev := range ch {
+	switch ev.Type {
+	case event.EventQueryEnd:
+		if p := ev.QueryEnd(); p != nil && p.Outcome != nil {
+			_ = p.Outcome.FinalText
+		}
+	case event.EventError:
+		if p := ev.Error(); p != nil {
+			_ = p.Message
+		}
 	}
 }
 ```
 
-**映射说明**：真实实现里很少用 `switch` 手写三层——多数是 **OpenAI 风格 tool_calls**；**spawn** 可做成 **builtin tool**（参数里带 `prompt` + `allowed_tools`），仍只有一个 **LLM→action** 通道。
-
-### 2.4 教学用核心接口（可选薄封装）
-
-下列接口用于 **讲清楚分层**；生产代码可直接用 agent-sdk-go 类型。
-
-```go
-type Agent interface {
-	Run(ctx Context) (Result, error)
-}
-
-type Tool interface {
-	Name() string
-	Call(input string) (string, error)
-}
-
-// Planner emits the next step; often implemented by LLM + schema / tool routing.
-type Planner interface {
-	Plan(ctx Context) Action
-}
-
-type Action struct {
-	Type         string // "tool" | "spawn_agent" | "finish"
-	Tool         string
-	Input        string
-	Prompt       string
-	AllowedTools []string
-	Result       string
-}
-```
-
-**注意**：`Planner` **不是** LangGraph；它只是 **一步决策** 的抽象，便于测试 mock。
-
-### 2.5 动态 Sub-Agent：递归 loop 与沙箱
-
-```go
-func spawnAgent(prompt string, allowedTools []string) string {
-	subCtx := NewContext(prompt)
-	subCtx.RestrictTools(allowedTools)
-
-	subAgent := NewAgent() // same loop implementation
-	result, _ := subAgent.Run(subCtx)
-	return result
-}
-```
-
-| 角色 | 工具面 |
-|------|--------|
-| 主 Agent | 全量或默认 allowlist |
-| 子 Agent | `allowedTools` **收紧**（如仅 `search` + `code`） |
-
-引擎层须配合 **MaxDepth**、并发与 budget（见 `multi-agent-engine.md` §3.8）。
-
-### 2.6 最小架构图（ASCII）
-
-```
-          ┌──────────────┐
-          │    Agent     │
-          └──────┬───────┘
-                 │ loop
-         ┌───────▼────────┐
-         │    Planner     │   ← LLM (one turn)
-         └───────┬────────┘
-                 │ action
-    ┌────────────┼────────────┐
-    │            │            │
-    ▼            ▼            ▼
- Tool        SpawnAgent     Finish
-(MCP/本地)    (递归 loop)
-```
-
-### 2.7 Demo 阶段避坑
-
-| 坑 | 建议 |
-|----|------|
-| ❌ 复杂 **workflow 引擎** | ✅ 保持 **loop + 三种 action**；编排图交给 **SeRagLF（MCP 内）** 若需要 RAG 闭环 |
-| ❌ 一上来 **多 Agent 协调框架** | ✅ **单主 Agent** + **spawn** 先跑通；`pkg/network` 静态策略可第二阶段再加 |
-| ❌ 复杂 **长期记忆基建** | ✅ 短期：`[]Message` / slice 即可；长期：**MCP（SeRagLF）** 或 mock |
-| ❌ 与 **Eino Graph** 抢职责 | ✅ 本仓库 **只做 loop runtime**；Graph 在 SeRagLF 进程内 |
-
-### 2.8 对外表述（README / 答辩可用）
-
-- **Go Agent Runtime**：**MCP-first skill 系统**（Tool Registry + 多 MCP）。
-- **动态 sub-agent spawning**（递归 loop、能力沙箱），语义对齐 **Claude Code** 类体验。
-- **自反思 / RAG** 通过 **SeRagLF MCP** 接入，而非在引擎内再造一套图。
-
-（关键词：**MCP**、**dynamic spawn**、**capability scoping**、**agent loop**、可选 **self-RAG via MCP**。）
+**说明**：若 **`entryAgent` 无 handoff**，Runner 行为接近直接调 **`Agent.Run`**；有 handoff 时 Runner 在内部切换 Agent 并维护 **`LoopState`**（见 `pkg/agent`）。
 
 ---
 
-## 3. RuntimeAction（给到用户的运行时动作）
+## 3. `Agent`：字段、选项与一轮 loop 心智
 
-用户侧不关心内部 `runner` 细节，只看到 **请求 → 事件流 / 最终结果**。
+### 3.1 核心字段（与 `pkg/agent/agent.go` 对齐）
 
-### 3.1 请求：`RuntimeRequest`
+| 字段 / 行为 | 说明 |
+|-------------|------|
+| `ChatModel` | `model.ToolCallingChatModel` |
+| `ToolInfos` | 本地工具；参与 **`tool.ValidateBindings`**（需 **Handle** 或 **`Executor`**） |
+| `mcpToolInfos` | 由 **`mcp.BootstrapToolInfos`** 填充；排在 `ToolInfos` 之后 |
+| `ExtraTools` | 发给模型；**不参与** `ValidateBindings`（如 **`transfer_to_*`**） |
+| `MCPServerProfiles` | 非空则每次 **`RunLoop`** 内 **`bindModel`** 时 Bootstrap |
+| `ToolInterceptor` | 返回 true 时 **不** `Invoke`，返回 **`InterceptedCall`**（transfer） |
+| `Variable` | 启用 **`var_set`** 与 **`[Variables]`** 块 |
 
-一次用户发起的「会话内动作」，引擎据此创建或续跑 **Run**。
+### 3.2 构造示例（本地工具 + 可选 MCP profile）
 
 ```go
-// RuntimeRequest is the user-visible intent for one interaction.
+chat := larkadapter.NewLarkChatModel(apiKey, "", modelName)
+
+local := []*model.ToolInfo{{
+	Name:        "echo",
+	Description: "Echo input",
+	Parameters: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"text": map[string]interface{}{"type": "string"},
+		},
+		"required": []string{"text"},
+	},
+	Handle: func(ctx context.Context, argumentsJSON string) (string, error) {
+		return argumentsJSON, nil
+	},
+}}
+
+ag := agent.New(chat,
+	agent.WithName("main"),
+	agent.WithToolInfos(local),
+	agent.WithMCPServerProfiles(cfg.MCPServerProfile{
+		ID:         "seraglf",
+		Transport:  cfg.MCPTransportStreamableHTTP,
+		URL:        "http://127.0.0.1:8080/mcp",
+		ToolPrefix: "seraglf__",
+	}),
+	agent.WithMaxSteps(32),
+)
+```
+
+**手动合并 MCP（不挂在 Agent 上）** 可用 **`agent.AttachMCP`**，再 **`WithToolInfos(append(local, b.ToolInfos...))`** 并 **`defer b.Stop()`**。
+
+### 3.3 主路径 loop（概念对齐 `pkg/agent/loop.go`）
+
+真实实现是 **for step := 0; step < maxSteps; step++**：拼 system → **`emit(call_llm_start)`** → **`Stream`** → **`emit(call_llm_end)`** → 若无 **`tool_calls`** 则结束；若有则 **`executeToolCalls` → `tool.Invoke`** → 把 tool 消息 append 到 **`[]*model.Message`** 再下一轮。
+
+与「Planner 输出 `tool|spawn_agent|finish`」教学模型的关系：**默认路径没有单独 Planner goroutine**；**`pkg/runtime/action.LoopAction`** 与 **`agent.Planner`** 接口存在，供测试或未来上层封装，**不是** `RunLoop` 的必经步骤。
+
+---
+
+## 4. 合并工具顺序与 `bindModel`
+
+**`mergedToolInfos`**（`pkg/agent/helpers.go`）顺序固定为：
+
+1. `ToolInfos`（本地）
+2. `mcpToolInfos`（MCP）
+3. `ExtraTools`（如 transfer、`var_set` 等注入）
+4. 可选 **extraRuntime**（单次 run 动态附加）
+
+发给模型的 **`WithTools`** 使用 **全量 merged**；**`ValidateBindings`** 只检查 **`ToolInfos` + `mcpToolInfos`**（不含 `ExtraTools`）。
+
+```
+  bindModel
+      |
+      +-- MCPServerProfiles non-empty? --> mcp.BootstrapToolInfos -> mcpToolInfos, mcpStop
+      |
+      +-- ValidateBindings(ToolInfos + mcpToolInfos, Executor)
+      |
+      +-- ChatModel.WithTools( mergedToolInfos(...) )
+```
+
+---
+
+## 5. `tool.Invoke` 解析链（示例）
+
+**源码顺序**（`pkg/tool/dispatch.go`）：
+
+```go
+func Invoke(ctx context.Context, infos []*model.ToolInfo, ex ToolExecutor, tc model.ToolCallPart) (string, error) {
+	if tc.Handle != nil {
+		return tc.Handle(ctx, tc.Arguments)
+	}
+	for _, info := range infos {
+		if info == nil || info.Name != tc.Name {
+			continue
+		}
+		if info.Handle != nil {
+			return info.Handle(ctx, tc.Arguments)
+		}
+	}
+	if ex != nil {
+		return ex.Execute(ctx, tc.Name, tc.Arguments)
+	}
+	// ... ErrNoHandler
+}
+```
+
+MCP 工具在 **`BootstrapToolInfos`** 里为每个远端 tool 设置 **`ToolInfo.Handle`**，因此落在 **第 2 步**（按 **暴露名** 匹配）。
+
+---
+
+## 6. Custom variables（`pkg/variable`）
+
+会话级 **自定义变量** 用于：跨轮次状态、在 **user message** 里用 **`{{key}}`** 做占位符替换、在 **system** 里注入 **`[Variables]`** 块，供模型只读当前值。实现集中在 **`pkg/variable`**，由 **`Agent`** 在启用 **`WithVariable`** 时接入 **`RunLoop`**。
+
+### 6.1 核心类型
+
+| 类型 | 作用 |
+|------|------|
+| **`VarStore`** | 线程安全的键值容器；每项为 **`VarEntry`**（`Value`、`Description`、`Visitable`）。 |
+| **`Manifest` / `Spec`** | 静态清单：声明 key、描述、可选 **Default**、**Visitable**（默认 true）。 |
+| **`Materialize`** | 合并 **清单** + 可选 **持久化快照** + **本轮 runtime 绑定** 得到初始 **`VarStore`**（见 `variable.Materialize`）。 |
+| **`StoreSnapshot`** | 序列化快照；用于跨请求恢复（如 test-server 按 `session_id` 存 JSON）。 |
+
+### 6.2 只读键：`const_` 前缀
+
+以 **`const_`** 开头的 key 对 **`var_set`（Agent 侧）只读**：**`VarStore.AgentSet`** 会拒绝写入。应用可在 **runtime 绑定** 或 **`Materialize`** 时设置这些键，供提示词说明「只读上下文」（如 `const_session_id`）。
+
+### 6.3 与 `Agent.RunLoop` 的接线
+
+1. **`LoopState.VarStore`**（`pkg/agent`）：若 Runner 传入共享 store，本轮沿用；否则 **`variable.New()`** 新建。
+2. **`ctx`**：**`variable.NewContext(ctx, vstore)`**，便于 **`VarSetTool`** 闭包外通过 **`variable.FromContext(ctx)`** 解析 store。
+3. **`agent.WithVariable()`**：`Variable == true` 时，向 **`bindModel`** 多传 **`variable.VarSetTool(vstore)`**（工具名 **`var_set`**）。该工具在 **extraRuntime** 一侧合并进 **`mergedToolInfos`**，故 **不参与** **`ValidateBindings`**（与 transfer 工具类似）。
+4. **用户消息**：首轮与后续每步会对 **`UserMessage` 模板** 做 **`ReplaceDoubleBraceParams`**，参数来自 **`stringParamsFromVarStore`**（visitiable 键的字符串化展示；未设置可显示为约定占位）。
+
+### 6.4 `var_set` 工具（模型调用）
+
+- **推荐**：`updates` 对象，一次改多个 key。
+- **兼容**：单字段 **`key` + `value`**（legacy）。
+
+```go
+// Tool name: "var_set". Handle uses closure VarStore or variable.FromContext(ctx).
+// Parameters (excerpt): updates map[string]any, or legacy key + value.
+```
+
+内部调用 **`store.AgentSet`**；**`const_`** 键被拒绝。
+
+### 6.5 System prompt：`[Variables]` 与 `SystemPromptBuilder`
+
+- 启用 **`WithVariable`** 时，**`runLoopFullSystem`** 会把 **`VarStore.PromptBlock()`** 以 **`[Variables]`** 形式并入 system（具体拼接见 **`pkg/agent/loop.go`** / **`user_message.go`**）。
+- 可选 **`SystemPromptBuilder`**：在 **`PromptBuildInput`** 里可拿到 **`VarStore`**、**`VariablePromptBlock`**，用于自定义 system 组装顺序（先 builder 再 **`{{name}}`** 替换等）。
+
+### 6.6 可观测：`var_change` 事件
+
+**`EventVarChange` / `VarChangePayload`** 已在 **`pkg/runtime/event`** 定义（含 **operation / key / value / agent**），客户端可按类型解析。当前 **`RunLoop` 在 `var_set` 成功路径上尚未统一 `emit` 该事件**；若需要 SSE 同步或审计，可在 **`executeToolCalls`** 或 **`VarStore` 层** 增加回调后发射（见 `doc/acceptance/v0.5.0-acceptance.md` 相关说明）。
+
+### 6.7 与 `Runner` / transfer
+
+**`runner.WithVarStore`** 可把 **同一 `VarStore`** 注入 **`LoopState`**，使多 Agent handoff **共享变量**；若未设置，每 Run 仍可在单 Agent 内使用独立 **`VarStore`**。
+
+---
+
+## 7. 用户侧契约：`RuntimeRequest` / `RuntimeEvent` / `RuntimeOutcome`
+
+### 7.1 请求
+
+```go
 type RuntimeRequest struct {
-	SessionID   string            // stable session for continuity
-	UserMessage string            // natural language input
-	RunMode     RunMode           // single_agent | network | inherit
-	Options     RuntimeOptions  // optional overrides
+	SessionID   string
+	UserMessage string
+	RunMode     RunMode // RunModeSingleAgent | RunModeNetwork | RunModeInherit
+	Options     RuntimeOptions
 }
 
-type RunMode string
-
-const (
-	RunModeSingleAgent RunMode = "single_agent"
-	RunModeNetwork     RunMode = "network"
-)
-
-// RuntimeOptions: model, skills, budgets; omit means use server defaults.
 type RuntimeOptions struct {
 	Model           string
 	SkillIDs        []string
 	MaxSteps        *int
 	SpawnMaxDepth   *int
-	NetworkStrategy string // when RunModeNetwork: parallel | sequential | competitive
+	NetworkStrategy string // e.g. parallel | sequential | competitive when RunModeNetwork
 }
 ```
 
-### 3.2 流式事件：`RuntimeEvent`（可选 SSE / WebSocket）
+### 7.2 事件：类型与构造
 
-用于 **打字机、步骤反馈、调试 UI**；每条为 **判别联合体**（实现可用 `type` 字段 + payload）。
+**`RuntimeEvent`**：`Type`（**`EventMessageType`**）、`RunID`、`Step`、`Payload`（**`EventPayload`** 实现类型）。
 
 ```go
-type RuntimeEventType string
-
-const (
-	EventToken       RuntimeEventType = "token"
-	EventStep        RuntimeEventType = "step"
-	EventToolStart   RuntimeEventType = "tool_start"
-	EventToolEnd     RuntimeEventType = "tool_end"
-	EventSpawnStart  RuntimeEventType = "spawn_start"
-	EventSpawnEnd    RuntimeEventType = "spawn_end"
-	EventError       RuntimeEventType = "error"
-	EventDone        RuntimeEventType = "done"
-)
-
-// RuntimeEvent is one outbound chunk to the user client.
-type RuntimeEvent struct {
-	Type    RuntimeEventType
-	RunID   string
-	Step    int    // logical step index after LLM or tool round, engine-defined
-	Payload any    // typed per Type; see below
-}
-
-// Examples of Payload shapes (define as separate structs in implementation):
-// TokenPayload: { "delta": "..." }
-// ToolStartPayload: { "tool_call_id": "...", "name": "..." }
-// ToolEndPayload: { "tool_call_id": "...", "ok": true }
-// SpawnStartPayload: { "child_run_id": "...", "depth": 1 }
-// SpawnEndPayload: { "child_run_id": "...", "ok": true }
-// ErrorPayload: { "code": "...", "message": "..." }
-// DonePayload: { "termination": "completed|max_steps|cancelled" }
+ev := event.Emit(runID, step, &event.CallLLMStartPayload{
+	Model:       "deepseek-...",
+	SystemPrompt: fullSystem,
+	Tools:       []event.LLMToolSummary{{Name: "echo", Description: "..."}},
+})
 ```
 
-### 3.3 最终结果：`RuntimeOutcome`
+**与 LLM 强相关的 payload**：**`CallLLMStartPayload`**（含 **`Tools`**、**`SystemPrompt`**；**`MCPServerIDs` / `MCPToolNames`** 字段已定义）、**`CallLLMEndPayload`**（**`FinishReason`**：`stop` | `tool_calls` | `length` | `error`**）、**`ToolCallStartPayload` / `ToolCallEndPayload`**。
 
-同步 API 或流结束时的 **汇总**；与 **观测**（tokens、cost）对齐。
+### 7.3 结束：`RuntimeOutcome`
 
 ```go
 type RuntimeOutcome struct {
@@ -234,285 +305,157 @@ type RuntimeOutcome struct {
 	FinalText     string
 	Termination   TerminationReason
 	Metrics       RunMetrics
-	ChildRunIDs   []string // if spawn occurred; optional flat list
-}
-
-type TerminationReason string
-
-const (
-	TerminationCompleted TerminationReason = "completed"
-	TerminationMaxSteps  TerminationReason = "max_steps"
-	TerminationCancelled TerminationReason = "cancelled"
-	TerminationError     TerminationReason = "error"
-)
-
-type RunMetrics struct {
-	InputTokens  int64
-	OutputTokens int64
-	TotalCostUSD float64 // estimated, from model catalog + usage
+	ChildRunIDs   []string
+	TransferChain []string
+	VarStore      *variable.VarStore `json:"-"`
 }
 ```
+
+### 7.4 典型事件顺序（单 Agent、无 error）
+
+```
+start -> question -> call_llm_start -> call_llm_end
+   -> (repeat: tool_call_start -> tool_call_end -> call_llm_start -> call_llm_end)
+   -> answer (streaming deltas) ...
+   -> query_end (payload.Outcome)
+```
+
+Transfer 模式下会插入 **`agent_transfer`**；变量侧可观测事件类型见 **§6.6**（**`var_change`** 载荷已定义，运行时发射视实现而定）。
 
 ---
 
-## 4. Agent 之间的信息交换结构
+## 8. `pkg/runtime/exchange`：跨 Agent 契约结构
 
-包含 **静态 Network**（多 Agent 流水线）与 **动态 Spawn**（父子 Run）。
-
-### 4.1 公共标识
+用于 **Network / Spawn** 等编排，与 **transfer 运行时**（handoff + Runner）互补。
 
 ```go
-// RunRef identifies one agent loop execution in the engine.
 type RunRef struct {
 	RunID       string
-	AgentRole   string // logical name: "planner", "worker", user-defined
-	ParentRunID string // empty if root
-	Depth       int    // 0 = root; spawn increments
+	AgentRole   string
+	ParentRunID string
+	Depth       int
 }
-```
 
-### 4.2 静态 Network：`NetworkTurn`（示意）
-
-预置 roster 时，各 slot 的 **输入/输出** 由 `pkg/network` 策略定义；引擎可包装为：
-
-```go
-// NetworkTurn describes one agent slot output feeding synthesis or next slot.
-type NetworkTurn struct {
-	SlotName   string
-	RunRef     RunRef
-	InputHint  string // optional: condensed task from orchestrator
-	OutputText string
-	ToolCalls  []ToolCall // if exposing mid-turn detail
-}
-```
-
-合成阶段由 **orchestrator** 产生 **FinalText**；对用户仍映射为 **RuntimeOutcome**。
-
-### 4.3 动态 Spawn：父 → 子 `SpawnSpec`
-
-父 Run 内模型调用 **spawn** 时，引擎解析为 **结构化规格**（可与 JSON Schema 对齐）。
-
-```go
-// SpawnSpec is the cross-agent contract from parent to child run.
 type SpawnSpec struct {
-	Task            string   // sub-goal in natural language
-	SystemAddendum  string   // appended to child system prompt
-	SkillIDs        []string // optional extra skills for child only
-	ToolAllowlist   []string // empty means inherit engine default subset
-	LoopOverrides   LoopOverrides
-	ModelOverride   string // optional
+	Task           string
+	SystemAddendum string
+	SkillIDs       []string
+	ToolAllowlist  []string
+	LoopOverrides  LoopOverrides
+	ModelOverride  string
 }
 
 type LoopOverrides struct {
 	MaxSteps *int
-	Timeout  *string // ISO-8601 duration string in API; time.Duration in Go
+	Timeout  *time.Duration
 }
 ```
 
-### 4.4 动态 Spawn：子 → 父 `SpawnResult`
-
-子 Run 结束后 **唯一回注通道**（与 tool result 一致）。
-
-```go
-// SpawnResult is returned to the parent agent as tool result content.
-type SpawnResult struct {
-	ChildRunRef RunRef
-	Status      SpawnStatus
-	FinalText   string
-	Error       *SpawnError
-	Metrics     RunMetrics
-}
-
-type SpawnStatus string
-
-const (
-	SpawnCompleted SpawnStatus = "completed"
-	SpawnFailed    SpawnStatus = "failed"
-	SpawnRejected  SpawnStatus = "rejected" // policy: depth, budget, allowlist
-)
-
-type SpawnError struct {
-	Code    string
-	Message string
-}
-```
-
-### 4.5 信息交换原则
-
-| 原则 | 说明 |
-|------|------|
-| **默认隔离** | 子 Run **不**自动包含父级全量消息；仅 `SpawnSpec` + 引擎注入的元数据（如 `parent_run_id`） |
-| **显式传递** | 若需上下文，由父在 `Task` / `SystemAddendum` 写入摘要 |
-| **可观测** | `ParentRunID` / `Depth` 进入 trace 与 **RuntimeEvent**（`spawn_start` / `spawn_end`） |
+**`internal/engine`** 声明 **`Spawner`**、**`LoopPolicy`** 等；**当前生产 MCP 接入**不依赖这些接口，而走 **`Agent.MCPServerProfiles` + `pkg/mcp`**。
 
 ---
 
-## 5. Tool 抽象
-
-统一 **本地函数**、**MCP 映射工具**、**内置 spawn** 的 **同一套表面**。
-
-### 5.1 描述：`ToolDescriptor`（暴露给模型）
+## 9. `pkg/model`：消息与 `ToolInfo`
 
 ```go
-type ToolOrigin string
-
-const (
-	ToolOriginLocal   ToolOrigin = "local"
-	ToolOriginMCP     ToolOrigin = "mcp"
-	ToolOriginBuiltin ToolOrigin = "builtin"
-)
-
-// ToolDescriptor is what the LLM sees in tools/list equivalent.
-type ToolDescriptor struct {
-	Name        string // exposed name, possibly prefixed for MCP
+type ToolInfo struct {
+	Name        string
 	Description string
-	InputSchema string // JSON Schema as string
-	Origin      ToolOrigin
-	// Optional: for debugging and policy
-	SourceRef   string // e.g. "mcp:seraglf#retrieve"
+	Parameters  map[string]interface{}
+	Handle      ToolCallHandler `json:"-"`
 }
-```
 
-### 5.2 调用与结果
-
-```go
-// ToolCall is emitted by the model (one round may have many).
-type ToolCall struct {
+type ToolCallPart struct {
 	ID        string
 	Name      string
-	Arguments string // JSON object as string
-}
-
-// ToolResult is fed back into the message history for the next loop round.
-type ToolResult struct {
-	ToolCallID string
-	Content    string // text or JSON string; engine-defined
-	IsError    bool
+	Arguments string
+	Handle    ToolCallHandler `json:"-"`
 }
 ```
 
-### 5.3 注册表键
-
-```go
-// ToolRegistryKey is internal stable id; exposed Name may differ (MCP prefix).
-type ToolRegistryKey struct {
-	Origin ToolOrigin
-	Name   string
-}
-```
-
-### 5.4 MCP 包装示例（Skill 可执行层）
-
-每个 **对外能力** 在注册表里占一个 **名字**；MCP 侧 `tools/list` 映射后 **看起来像普通 Tool**。与 **§2.1**「Skill = MCP + Registry」一致。
-
-```go
-// Conceptual: one MCP-backed tool wraps one MCP tool name.
-type MCPSkill struct {
-	ServerID  string
-	ToolName  string
-	Client    MCPClient // session + tools/call
-}
-
-func (s *MCPSkill) Name() string {
-	return s.ServerID + "__" + s.ToolName // or alias from config
-}
-
-func (s *MCPSkill) Call(input string) (string, error) {
-	return s.Client.CallTool(s.ToolName, input)
-}
-```
-
-```go
-toolRegistry.Register("search", mcpSearchTool)
-toolRegistry.Register("memory", mcpMemoryTool)
-```
-
-**与 `SKILL.md` 的关系**：文档负责 **行为约束与流程**；**MCP** 负责 **可执行能力**；二者叠加，不是二选一。
+**`pkg/runtime/tool`** 另有一套 **`ToolDescriptor` / `ToolOrigin`** 等，用于 **元数据与编排描述**；**Agent 主路径**以 **`model.ToolInfo`** 为准。
 
 ---
 
-## 6. MCP 抽象
+## 10. MCP：`cfg`、Bootstrap、调试
 
-### 6.1 连接配置：`MCPServerProfile`
-
-每个 MCP Server 一条配置；引擎启动 **connector**。
+### 10.1 Profile（节选）
 
 ```go
-type MCPTransportKind string
+type MCPServerProfile struct {
+	ID            string
+	Transport     MCPTransportKind // MCPTransportStdio | MCPTransportStreamableHTTP
+	Command       []string
+	URL           string
+	Env           map[string]string
+	Headers       map[string]string
+	ToolPrefix    string
+	ToolAllowlist []string
+}
+```
 
-const (
-	MCPTransportStdio          MCPTransportKind = "stdio"
-	MCPTransportStreamableHTTP MCPTransportKind = "streamable_http"
+### 10.2 集成：Discover → 暴露名 → Handle
+
+- **暴露名**：**`ToolPrefix + MCPToolName`**（**`mcp.ExposedToolName`**）。
+- **Bootstrap**：**`mcp.BootstrapToolInfos(ctx, profiles...)`** → **`[]*model.ToolInfo`** + **`stop`**。
+
+### 10.3 调试包（不经 Agent）
+
+```go
+import (
+	"context"
+
+	lfdebug "loopforge/debug"
+	"loopforge/pkg/mcp/cfg"
 )
 
-type MCPServerProfile struct {
-	ID          string // stable id: "seraglf", "filesystem"
-	Transport   MCPTransportKind
-	Command     []string // stdio: argv
-	URL         string   // http: base URL if applicable
-	Env         map[string]string
-	Headers     map[string]string // http auth
-	ToolPrefix  string            // exposed name prefix, e.g. "seraglf__"
-}
+conn, stop, err := lfdebug.Dial(ctx, cfg.MCPServerProfile{
+	ID:        "probe",
+	Transport: cfg.MCPTransportStreamableHTTP,
+	URL:       "http://127.0.0.1:8080/mcp",
+})
+if err != nil { /* ... */ }
+defer stop()
+
+_ = conn.Ping(ctx)
+tools, _ := conn.ListTools(ctx)
+_, _ = conn.CallTool(ctx, "some_mcp_tool_name", map[string]any{"query": "x"})
 ```
-
-### 6.2 映射：`MCPMappedTool`
-
-将 MCP 的 tool 名称映射到 **ToolDescriptor.Name**（带前缀防冲突）。
-
-```go
-type MCPMappedTool struct {
-	ServerID     string
-	MCPToolName  string // as returned by MCP tools/list
-	ExposedName  string // equals profile.ToolPrefix + MCPToolName or custom alias
-	InputSchema  string // from MCP tool definition
-}
-```
-
-### 6.3 调用路径
-
-| 步骤 | 说明 |
-|------|------|
-| Discover | `tools/list` per connection → build `MCPMappedTool` list |
-| Expose | merge into **ToolRegistry** as `ToolOriginMCP` |
-| Invoke | model calls `ToolCall.Name` → engine routes to MCP `tools/call` with **MCPToolName** + arguments |
-
-### 6.4 Resources / Prompts（可选）
-
-若产品需要，可并行维护：
-
-```go
-type MCPResourceRef struct {
-	ServerID string
-	URI      string
-}
-
-type MCPPromptRef struct {
-	ServerID string
-	Name     string
-}
-```
-
-引擎策略决定是 **预取为上下文** 还是 **暴露为只读工具**；详见 `multi-agent-engine.md` §3.7。
 
 ---
 
-## 7. 与实现栈的对应关系
+## 11. `internal/engine` 补充
 
-| 抽象 | 典型落点 |
-|------|----------|
-| **§2** 三种 action / `Planner` | 概念映射到 LLM `tool_calls` + builtin `spawn` |
-| `RuntimeRequest` / `RuntimeEvent` / `RuntimeOutcome` | `internal/engine` + 接入层（HTTP handler） |
-| `SpawnSpec` / `SpawnResult` | `Spawner` + builtin `spawn_subagent` tool |
-| `ToolDescriptor` / `ToolCall` / `ToolResult` | `pkg/tool` 扩展 + `ToolRegistry` |
-| `MCPServerProfile` / `MCPMappedTool` | `internal/mcp` |
+| 项 | 说明 |
+|----|------|
+| **`Engine`** | **`agent.Runnable`** 薄接口 |
+| **`MCPConnector` / `MCPSession`** | 编排层可选抽象；**当前实现**用 **`pkg/mcp`** |
+| **`Planner` 别名** | 指向 **`pkg/agent.Planner`** |
 
 ---
 
-## 8. 相关文档
+## 12. 与代码目录的对应关系
+
+| 主题 | 包路径 |
+|------|--------|
+| 请求 / 事件 / 结果 | `pkg/runtime/request`、`pkg/runtime/event`、`pkg/runtime/outcome` |
+| 概念一步三决策 | `pkg/runtime/action` |
+| Spawn/Network 结构 | `pkg/runtime/exchange` |
+| Agent loop、MCP 合并 | `pkg/agent` |
+| Runner、transfer | `pkg/runner` |
+| 模型与适配器 | `pkg/model`、`pkg/model/adapters/*` |
+| Tool 分发 | `pkg/tool` |
+| MCP | `pkg/mcp/cfg`、`pkg/mcp` |
+| MCP 调试 | `loopforge/debug` |
+| 变量 | `pkg/variable` |
+
+---
+
+## 13. 相关文档
 
 | 文档 | 内容 |
 |------|------|
-| `data-fusion.md` | 与现网 runner **类型对齐**：`EventMessage`、`EventMessageType`、三层 **id 语义**（非落库/Push） |
-| `multi-agent-engine.md` | Loop、spawn、skills、MCP 行为与验收 |
-| `architecture.md` | 模块与部署 |
+| `doc/design/data-fusion.md` | 事件类型与现网对齐 |
+| `doc/design/multi-agent-engine.md` | 多 Agent、spawn、路线图 |
+| `doc/design/mcp-tool-unification.md` | MCP 与 Lark/Ark 单出口 |
+| `doc/design/architecture.md` | 模块与部署（若存在） |

@@ -1,3 +1,5 @@
 test-server/test-server
 test-server/bin/
 *.hertz.gz
+.vscode/
+.codebuddy/

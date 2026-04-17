@@ -2,6 +2,7 @@ package agent
 
 import (
 	"loopforge/pkg/model"
+	"loopforge/pkg/mcp/cfg"
 	"loopforge/pkg/tool"
 )
 
@@ -53,6 +54,19 @@ func WithModelName(m string) Option {
 func WithToolInfos(infos []*model.ToolInfo) Option {
 	return func(a *Agent) {
 		a.ToolInfos = infos
+	}
+}
+
+// WithMCPServerProfiles sets MCP server connection profiles. On each Run, the agent
+// discovers tools (tools/list) and merges them after ToolInfos; use ToolPrefix on each
+// profile to avoid name clashes. Sessions are released when the run finishes.
+func WithMCPServerProfiles(profiles ...cfg.MCPServerProfile) Option {
+	return func(a *Agent) {
+		if len(profiles) == 0 {
+			a.MCPServerProfiles = nil
+			return
+		}
+		a.MCPServerProfiles = append([]cfg.MCPServerProfile(nil), profiles...)
 	}
 }
 

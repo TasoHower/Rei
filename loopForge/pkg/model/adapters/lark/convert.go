@@ -162,6 +162,12 @@ func arkToolParametersForAPI(params map[string]interface{}) map[string]interface
 	return out
 }
 
+// SanitizeToolParametersForAPI applies the same JSON Schema normalization the Lark adapter uses
+// before sending tool definitions to Ark. MCP-derived ToolInfo.Parameters must use this path.
+func SanitizeToolParametersForAPI(params map[string]interface{}) map[string]interface{} {
+	return arkToolParametersForAPI(params)
+}
+
 func toArkTools(tools []*lpmodel.ToolInfo) []*arkmodel.Tool {
 	if len(tools) == 0 {
 		return nil

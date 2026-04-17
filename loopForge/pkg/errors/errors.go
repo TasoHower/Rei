@@ -84,6 +84,15 @@ var ErrReadOnly = errors.New("loopforge: variable is read-only (const_ prefix)")
 var ErrNoStore = errors.New("loopforge: no variable store in context")
 
 // ---------------------------------------------------------------------------
+// Debug (see loopforge/debug)
+// ---------------------------------------------------------------------------
+
+// ErrDebugNilConnection is returned by debug.Conn methods when the receiver
+// or underlying session is nil. The module root package loopforge re-exports
+// this sentinel as loopforge.ErrDebugNilConnection.
+var ErrDebugNilConnection = errors.New("loopforge: debug connection is nil")
+
+// ---------------------------------------------------------------------------
 // Structured error types (use errors.As to extract fields)
 // ---------------------------------------------------------------------------
 

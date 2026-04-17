@@ -132,6 +132,8 @@ agent-sdk-go 已提供 `pkg/tool`（函数工具与 Schema）。loopForge 侧补
 - **沙箱边界**：可选对入参大小、调用频率做限制（按产品要求）。
 - **结果回注**：tool result 进入消息历史，由 runner 进入下一轮 loop。
 
+**统一建模（MCP vs 本地 function）**：声明与执行分层、路由与 Ark schema 单出口等 **技术方案** 见 **`doc/design/mcp-tool-unification.md`**（含 **使用方只提交 `MCPServerProfile`、SDK `pkg/mcp.BootstrapToolInfos` 自动发现绑定**、**协议级调试** 仅在 **`loopforge/debug`**、及与 Eino `BaseTool` / `InvokableTool` 概念的 **对照**；loopForge **不依赖** Eino SDK）。
+
 ### 3.3 Memory / RAG（本引擎中的位置）
 
 **不作为独立子系统实现**。需要记忆与检索时：

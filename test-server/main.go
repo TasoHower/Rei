@@ -209,14 +209,23 @@ func mathToolInfos() []*model.ToolInfo {
 // --- agent builders ---
 
 func buildSingleAgent(req *ChatRequest) *agent.Agent {
-	a := agent.New(nil,
+	sys := req.SystemPrompt
+	mcpProf, mcpSuffix := mcpAgentExtras()
+	if mcpSuffix != "" {
+		sys += mcpSuffix
+	}
+	opts := []agent.Option{
 		agent.WithName("test-server-agent"),
 		agent.WithModelName(req.Model),
 		agent.WithMaxSteps(12),
-		agent.WithSystemInstructions(req.SystemPrompt),
+		agent.WithSystemInstructions(sys),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
-	)
+	}
+	if len(mcpProf) > 0 {
+		opts = append(opts, agent.WithMCPServerProfiles(mcpProf...))
+	}
+	a := agent.New(nil, opts...)
 	runner.ApplyLarkFromConfig(a, req.APIKey, req.BaseURL, req.Model)
 	return a
 }
@@ -253,15 +262,24 @@ Optional: var_set session_note when the user wants a preference remembered.`),
 	)
 	mathExpert.ChatModel = triage.ChatModel
 
-	writer := agent.New(nil,
+	writerSys := `You are a creative writer. When the user asks for 参数赋值 / var_set / [Variables], use var_set to fill session_note and user_goal as requested, then reply briefly. For normal creative requests, write as usual; you may still use var_set if the user wants session fields updated.`
+	mcpProf, mcpSuffix := mcpAgentExtras()
+	if mcpSuffix != "" {
+		writerSys += mcpSuffix
+	}
+	writerOpts := []agent.Option{
 		agent.WithName("writer"),
 		agent.WithDescription("Creates creative text, stories, poems, and other written content."),
 		agent.WithModelName(req.Model),
 		agent.WithMaxSteps(20),
-		agent.WithSystemInstructions(`You are a creative writer. When the user asks for 参数赋值 / var_set / [Variables], use var_set to fill session_note and user_goal as requested, then reply briefly. For normal creative requests, write as usual; you may still use var_set if the user wants session fields updated.`),
+		agent.WithSystemInstructions(writerSys),
 		agent.WithCallOptions(model.WithTemperature(0.7)),
 		agent.WithVariable(),
-	)
+	}
+	if len(mcpProf) > 0 {
+		writerOpts = append(writerOpts, agent.WithMCPServerProfiles(mcpProf...))
+	}
+	writer := agent.New(nil, writerOpts...)
 	writer.ChatModel = triage.ChatModel
 
 	triage.AddHandoff(mathExpert, writer)
@@ -333,10 +351,15 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 		for ev := range ch {
 			if ev.Type == event.EventCallLLMStart {
 				if p := ev.CallLLMStart(); p != nil {
-					logger.Info("call_llm_start system prompt",
+					toolsJSON, _ := json.Marshal(p.Tools)
+					logger.Info("call_llm_start",
 						"step", ev.Step,
+						"agent", p.AgentName,
 						"model", p.Model,
+						"mcp_server_ids", p.MCPServerIDs,
+						"mcp_tool_names", p.MCPToolNames,
 						"system_prompt", p.SystemPrompt,
+						"tools_json", string(toolsJSON),
 					)
 				}
 			}
@@ -421,7 +444,7 @@ func runtimeEventToSSE(ev *event.RuntimeEvent) SSEEvent {
 func main() {
 	addr := os.Getenv("ADDR")
 	if addr == "" {
-		addr = ":8080"
+		addr = ":8191"
 	}
 
 	logger := slog.Default()
@@ -435,5 +458,6 @@ func main() {
 	h.POST("/api/chat", handleChat(logger))
 
 	logger.Info("loopForge test-server starting", "addr", addr)
+	logMCPStartup(logger)
 	h.Spin()
 }

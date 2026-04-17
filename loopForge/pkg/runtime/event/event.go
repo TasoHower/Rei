@@ -72,14 +72,29 @@ type AnswerPayload struct {
 
 func (*AnswerPayload) eventPayload() EventMessageType { return EventAnswer }
 
+// LLMToolSummary is one tool/function definition passed to the chat model (name, description, JSON Schema parameters).
+type LLMToolSummary struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+}
+
 type CallLLMStartPayload struct {
 	Model       string   `json:"model"`
 	Temperature *float64 `json:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty"`
 	TopP        *float64 `json:"top_p,omitempty"`
+	// AgentName is the running agent template name (e.g. triage, writer).
+	AgentName string `json:"agent,omitempty"`
+	// MCPServerIDs lists cfg profile IDs when this agent has WithMCPServerProfiles (empty if none).
+	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
+	// MCPToolNames lists tool names discovered from MCP tools/list for this run (empty if no MCP or no tools).
+	MCPToolNames []string `json:"mcp_tool_names,omitempty"`
 	// SystemPrompt is the final system instructions sent on this LLM call
 	// (after builders, variable block merge, and VarStore {{}} replacement).
 	SystemPrompt string `json:"system_prompt,omitempty"`
+	// Tools lists function definitions bound for this LLM call (same order as merged ToolInfos + MCP + extras).
+	Tools []LLMToolSummary `json:"tools,omitempty"`
 }
 
 func (*CallLLMStartPayload) eventPayload() EventMessageType { return EventCallLLMStart }
