@@ -266,8 +266,6 @@ Optional: var_set session_note only if the user explicitly asks to store a prefe
 	}
 	if len(mcpProf) > 0 {
 		mathOpts = append(mathOpts, agent.WithMCPServerProfiles(mcpProf...))
-	} else {
-		mathOpts = append(mathOpts, agent.WithToolInfos(mathToolInfos()))
 	}
 	mathExpert := agent.New(nil, mathOpts...)
 	mathExpert.ChatModel = triage.ChatModel

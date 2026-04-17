@@ -1,0 +1,21 @@
+---
+description: 修改代码前对照对应子工程 doc/log 下的版本计划（progress-v*.md）
+alwaysApply: true
+---
+
+# 修改代码前对照 doc/log（Rei.）
+
+在本仓库改实现之前：
+
+1. **先找对应当前改动范围的 `doc/log`**  
+   仓库根目录下没有单一的 `./doc/log`，版本计划按顶层模块划分，例如：
+   - `loopForge/doc/log/` — loopForge 里程碑（`progress-v*.md`）
+   - `SeRagLF/doc/log/` — SeRagLF 里程碑（`progress-v*.md`）
+
+2. **阅读相关进度文档**  
+   选用与当前工作匹配的里程碑（多为最新的 `progress-v*.md`，或对话中指定的版本）。浏览范围、验收、决策与待办。
+
+3. **保持实现与文档一致**  
+   仅实现该计划允许的范围；若必须与文档不一致，先与用户确认或同步更新文档后再改代码。
+
+**反例：** 未读对应模块的 `doc/log` 就改包内代码，导致范围跑偏或重复劳动。

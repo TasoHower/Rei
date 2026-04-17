@@ -3,7 +3,8 @@
 > **版本**：v0.6.0  
 > **日期**：2026-04-16（计划稿）  
 > **里程碑**：**MCP（Model Context Protocol）客户端与工具接入** — 在 Agent loop 内将远端 MCP tools 与本地 `ToolInfo` 统一暴露；**联调与验收以 SeRagLF（`seraglf`）为参考 MCP Server**  
-> **上一版本**：v0.5.2（Lark 适配器、Runner 默认 Lark、Ark 工具 schema 兼容）
+> **上一版本**：v0.5.2（Lark 适配器、Runner 默认 Lark、Ark 工具 schema 兼容）  
+> **下一版本**：[v0.7.0](progress-v0.7.0.md)（Skills 技能 / 指令包）
 
 ---
 

@@ -165,11 +165,103 @@ agent-sdk-go 已提供 `pkg/tool`（函数工具与 Schema）。loopForge 侧补
 
 | 要素 | 说明 |
 |------|------|
-| **载体** | 例如目录下的 `SKILL.md`（front matter：name、version、description）+ 正文指令；或等价 JSON 清单（由引擎解析） |
+| **载体** | 目录下的 `SKILL.md`（**必须包含 YAML front matter**：`name`、`description` 必填；`allowed-tools`、`model`、`license` 可选；可有项目扩展字段）+ 正文指令；或等价 JSON 清单（由引擎解析） |
 | **发现** | 启动扫描 `SKILL_PATH`；或运行时通过工具 **`load_skill(name)`**（若开放）仅加载白名单技能 |
 | **注入** | 将 skill 正文以 **system** 或 **developer** 消息片段挂载到**指定 Agent**（根 Agent / 某 spawn 子 Agent），并可与 **MCP Prompts** 区分优先级（引擎策略：后加载覆盖或显式优先级字段） |
 | **与子 Agent** | 父模型在 `spawn` 参数中可指定 **附加 skill 列表**，用于只给子任务「临时家规」，避免污染根上下文 |
 | **安全** | 技能来自**受信根目录**或签名清单；禁止未校验路径；记录审计日志（谁、何时、加载了哪一版 skill） |
+
+#### 概念：Skill 是什么、不是什么
+
+| 维度 | 说明 |
+|------|------|
+| **是什么** | **受信的提示与流程知识包**：元数据（名称、版本、描述）+ **正文**（操作步骤、约定、输出格式、何时调用何种工具等）。装载后进入 **模型上下文**，由 **LLM 在 loop 中遵循**，与 **MCP tools / 本地 `ToolInfo`** 配合完成「想做什么」与「能调用什么」。 |
+| **不是什么** | **默认不是**在 loopForge 进程内 **直接执行 Skill 文件里的任意代码**（例如把 `SKILL.md` 当脚本 interpret）。那样会带来巨大攻击面；若产品未来需要「可执行插件」，应单独设计 **沙箱 / 签名 / 隔离**（与本节 **v0.7.0** 范围解耦）。 |
+| **与 Tool 的边界** | Skill 负责 **策略与行文**；**副作用与对外 I/O** 仍应走 **已声明的 Tool**（含 MCP `tools/call`）。Skill 正文可以 **教模型何时调用哪个 tool name**，但 **不会** 自动获得新的 tool 能力——新能力仍须 **注册为 `ToolInfo` / MCP 映射**。 |
+
+#### 关键改造点（实现视角）
+
+1. **`SkillRegistry`（或等价模块）**：从 **`SKILL_PATH`** 扫描并解析 `SKILL.md` / 清单 → 内存中的 **`SkillSpec`**（name、version、body、来源路径哈希等）。支持 **只读快照** 供并发 Run 使用；动态加载时 **版本递增或 generation**，避免与进行中的 Run 互相踩踏（见下「运行时」）。  
+2. **构造期绑定**：**Runner / `NewAgent`** 路径读取配置中的 **`skills: []string`（或 `SkillRefs`）**，在 **`WithTools` / `bindModel` 之前** 向 **system / developer** 注入拼接后的 skill 文本；未知名称 **构造期报错**（与 `tool.ValidateBindings` 同类体验）。  
+3. **消息形态**：推荐 **单一追加块**（例如 `## Loaded skills` 下按顺序拼接），或按优先级拆成多条 **system** 片段（顺序写进文档与验收用例）。  
+4. **观测**：每次 **装载 / 注入** 打 **audit 日志** + **OTel span**（`skill.name`、`skill.version`、`source`），便于对照模型行为与配置。  
+
+#### Agent 如何「注册」Skill
+
+此处的 **注册**指：**把选中的 Skill 绑定到某个 Agent 实例的初始上下文**，而不是向模型再注册一批 function schema。
+
+推荐流程：
+
+1. 进程启动（或显式 `Reload`）时：`SkillRegistry.LoadFromPaths(SKILL_PATH)`。  
+2. 用户或配置声明：`Agent` / `Run` 选项携带 **`SkillNames []string`**（或 **`SkillRefs`**，含版本 pin）。  
+3. 构造 `Agent` 时：对每个 name 调用 `Registry.Get(name)`，将返回的 **body** 按约定拼进 **system prompt 管线**（与 **MCP Prompts**、**静态 SystemPromptBuilder** 的合成顺序见引擎策略表）。  
+4. **首轮 `Stream` 之前** 完成注入，使模型从第一步起即可「看到」技能说明。
+
+示意（伪配置，非最终 API）：
+
+```go
+// Illustrative only — names and types subject to API review.
+type AgentSkillOptions struct {
+	SkillNames []string // resolved against SkillRegistry before first model call
+}
+
+// Registry is populated at startup from SKILL_PATH (and optional runtime reload).
+```
+
+#### 运行时如何动态加载 Skill
+
+**静态路径（MVP）**：仅 **进程启动时** 扫描一次；改磁盘文件需 **重启进程** 或 **显式 Reload API**（若提供）。
+
+**动态路径（可选，v0.7.0+）** 两类常见形态：
+
+| 机制 | 行为 | 约束 |
+|------|------|------|
+| **受控工具 `load_skill(name)`** | 模型在 loop 内调用 → 引擎校验 **allowlist** → 将对应 **SkillSpec.body** **追加**到 **当前 Run** 的后续轮次上下文（或触发 **会话级** 缓存更新） | 必须 **审计**；默认 **关闭** 或 **强白名单**；防止加载任意路径 |
+| **管理面 `ReloadSkills(ctx)`** | 运维 / 测试重新扫描 `SKILL_PATH`，更新 **Registry** 快照 | 进行中的 Run 仍使用 **启动时或 Run 创建时** 绑定的 generation（**copy-on-write** 或 **per-Run snapshot**），避免竞态 |
+
+**与「动态」相关的模型语义**：动态加载 **不是** 在进程里执行 skill 文件里的代码，而是 **把新的文本注入上下文**（或在下轮起生效），使模型 **后续推理** 能遵循新指令。
+
+#### Skill 里的「函数」如何落地
+
+| 含义 | 在 loopForge 中的落点 |
+|------|----------------------|
+| **正文里的步骤 / 清单** | **自然语言程序**：由 **LLM 理解与执行**（是否严格逐步取决于模型与温度）；引擎 **不** 逐步解释执行。 |
+| **希望可复用的「逻辑块」** | 若需要 **确定性、可测试** 的行为，应实现为 **`ToolInfo.Handle` / MCP tool**，在 Skill 正文中 **写明 tool 名称与参数约定**；Skill 充当 **调用说明书**。 |
+| **结构化片段（可选）** | 可在 `SKILL.md` 中约定 ** fenced YAML/JSON** 块表示 checklist、参数模板；解析器仅做 **校验与注入排版**，**不做** 任意表达式求值。 |
+
+**结论**：所谓 **skill function** 在架构上优先理解为 **「模型遵循的程序化说明」**；需要 **真·函数执行** 时，统一到 **Tool / MCP** 层，Skill 不替代工具注册。
+
+#### 「执行 Skill 的代码」在引擎中的含义
+
+| 说法 | 引擎实际做的事 |
+|------|----------------|
+| **执行 Skill** | **装载 + 注入上下文**，让模型在 **tool loop** 中按 skill 文本行动；**执行**的主体是 **模型 + 已有 Tool**。 |
+| **执行代码** | 通过 **`SkillJobRunner`** 受控执行 `scripts/`；必须经过完整性校验与运行策略（allowlist、timeout、sandbox）。禁止把 `SKILL.md` 正文当脚本直接解释执行。 |
+
+**阶段取舍（v0.7.0）**：采用 **frontmatter 首阶段加载 → 按需加载正文/资源 → 受控执行 scripts**。脚本执行必须走 **`SkillJobKind` + `SkillJobRouter`** 的显式路由，不从文本猜测。具体见 **`doc/log/progress-v0.7.0.md`**（**§1.2 脚本语言与执行器选择**、**§1.3 目录与完整性检查**、代码改造 **§11**）。
+
+```mermaid
+flowchart LR
+  subgraph load [Load]
+    P[SKILL_PATH]
+    R[SkillRegistry]
+    P --> R
+  end
+  subgraph bind [Bind per Agent]
+    C[Agent skill names]
+    M[System or developer messages]
+    R --> C
+    C --> M
+  end
+  subgraph run [Run]
+    L[LLM loop]
+    T[Tools and MCP]
+    M --> L
+    L --> T
+  end
+```
+
+**实现计划**：`doc/log/progress-v0.7.0.md`（版本 **v0.7.0**）。**解析与类型**：`SkillFrontmatter`、`ParsedSkillFile`、`SkillSpec`、`SkillMeta` 及解析管线见该文档 **§1.1**；**目录规范与完整性检查**（`SKILL.md` + 可选 `scripts/`/`references/`/`assets/`、`SkillBundleManifest`、哈希校验）见 **§1.3**；**`pkg/skill` 枚举常量禁止使用 `iota`**（须显式赋值），见同文档 **「编码约定」**。
 
 ### 3.7 MCP 接入（多 Server、工具与资源）
 
