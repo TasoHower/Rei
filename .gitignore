@@ -3,3 +3,4 @@ test-server/bin/
 *.hertz.gz
 .vscode/
 .codebuddy/
+.cursor/

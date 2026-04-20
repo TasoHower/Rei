@@ -1,8 +1,8 @@
 package agent
 
 import (
-	"loopforge/pkg/model"
 	"loopforge/pkg/mcp/cfg"
+	"loopforge/pkg/model"
 	"loopforge/pkg/tool"
 )
 

@@ -74,7 +74,6 @@ func (a *Agent) bindModel(ctx context.Context, extraRuntimeTools ...*model.ToolI
 	return a.ChatModel, nil
 }
 
-
 // resolveMaxSteps determines the effective max loop iterations from the
 // agent default, falling back to 16, with per-request override.
 func (a *Agent) resolveMaxSteps(req *request.RuntimeRequest) int {

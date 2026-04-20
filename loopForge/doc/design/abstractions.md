@@ -459,3 +459,8 @@ _, _ = conn.CallTool(ctx, "some_mcp_tool_name", map[string]any{"query": "x"})
 | `doc/design/multi-agent-engine.md` | 多 Agent、spawn、路线图 |
 | `doc/design/mcp-tool-unification.md` | MCP 与 Lark/Ark 单出口 |
 | `doc/design/architecture.md` | 模块与部署（若存在） |
+
+---
+# 变更日志
+| 日期 | 版本 | 变更说明 |
+|------|------|----------|

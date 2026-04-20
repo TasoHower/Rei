@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"loopforge/pkg/model"
 	"loopforge/pkg/mcp/cfg"
+	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
