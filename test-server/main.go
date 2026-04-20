@@ -25,17 +25,21 @@ import (
 	"loopforge/pkg/runner"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/skill"
 	"loopforge/pkg/variable"
 )
 
 const (
-	defaultModel = "deepseek-v3-2-251201"
+	defaultModel        = "deepseek-v3-2-251201"
 	defaultSystemPrompt = `You are the loopForge test assistant (single-agent mode).
 
 Shared variables appear in a [Variables] block at the end of the system prompt. Keys starting with const_ are read-only; never call var_set on them.
 Use var_set to write user-requested values for writable keys. When MCP arithmetic tools are available (names may be prefixed), call them for every numeric step; do not compute mentally.
 
 After finishing, reply briefly and confirm what you set or computed.`
+	defaultSkillDebugSystemPrompt = `You are the loopForge Skill Runtime debugger (single-agent). Loaded skills appear as markdown sections ## Skill: <name> in the system prompt.
+Follow skill text when it applies. Use built-in add/subtract/multiply/divide tools for arithmetic when MCP tools are not available.
+Use var_set only when testing the variable store. If execute_shell_script or load_skill are listed, use them only as allowed by the skill and tool descriptions.`
 )
 
 // ChatRequest is the JSON body for POST /api/chat.
@@ -51,6 +55,13 @@ type ChatRequest struct {
 	// MCPMode: "env" (default) uses server env defaults; "off" disables MCP; "custom" uses MCP.
 	MCPMode string     `json:"mcp_mode,omitempty"`
 	MCP     *MCPFields `json:"mcp,omitempty"`
+
+	// SkillRuntime: when SkillDebug is true, default system prompt targets skill inspection; SkillNames selects registry entries.
+	SkillDebug bool     `json:"skill_debug,omitempty"`
+	SkillNames []string `json:"skill_names,omitempty"`
+	SkillShell bool     `json:"skill_shell,omitempty"`
+	SkillLoad  bool     `json:"skill_load,omitempty"`
+	ShowSystem bool     `json:"show_system_prompt,omitempty"`
 }
 
 // SSEEvent is the JSON payload written as SSE data for each RuntimeEvent.
@@ -72,11 +83,39 @@ func (r *ChatRequest) resolveDefaults() {
 		r.Model = firstNonEmpty(os.Getenv("LARK_MODEL"), os.Getenv("ARK_MODEL"), os.Getenv("DOUBAO_MODEL"), defaultModel)
 	}
 	if r.SystemPrompt == "" {
-		r.SystemPrompt = defaultSystemPrompt
+		if r.SkillDebug {
+			r.SystemPrompt = defaultSkillDebugSystemPrompt
+		} else {
+			r.SystemPrompt = defaultSystemPrompt
+		}
 	}
 	if r.Mode == "" {
 		r.Mode = "single"
 	}
+}
+
+func trimStringSlice(in []string) []string {
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func (r *ChatRequest) effectiveSkillNames(reg *skill.SkillRegistry) []string {
+	names := trimStringSlice(r.SkillNames)
+	if len(names) > 0 {
+		return names
+	}
+	if r.SkillDebug && reg != nil {
+		if _, err := reg.Get("demo"); err == nil {
+			return []string{"demo"}
+		}
+	}
+	return nil
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -209,7 +248,7 @@ func mathToolInfos() []*model.ToolInfo {
 
 // --- agent builders ---
 
-func buildSingleAgent(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffix string) *agent.Agent {
+func buildSingleAgent(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffix string, reg *skill.SkillRegistry) *agent.Agent {
 	sys := req.SystemPrompt
 	if mcpSuffix != "" {
 		sys += mcpSuffix
@@ -221,18 +260,43 @@ func buildSingleAgent(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffi
 		agent.WithSystemInstructions(sys),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
+		agent.WithToolInfos(mathToolInfos()),
 	}
 	if len(mcpProf) > 0 {
 		opts = append(opts, agent.WithMCPServerProfiles(mcpProf...))
+	}
+	names := req.effectiveSkillNames(reg)
+	if reg != nil && len(names) > 0 {
+		opts = append(opts, agent.WithSkills(reg, names...))
+	}
+	if req.SkillShell {
+		opts = append(opts, agent.WithSkillShellTool(true))
+	}
+	if req.SkillLoad {
+		opts = append(opts, agent.WithLoadSkillTool(true))
 	}
 	a := agent.New(nil, opts...)
 	runner.ApplyLarkFromConfig(a, req.APIKey, req.BaseURL, req.Model)
 	return a
 }
 
+func appendSkillRuntimeOpts(req *ChatRequest, reg *skill.SkillRegistry, opts []agent.Option) []agent.Option {
+	names := req.effectiveSkillNames(reg)
+	if reg != nil && len(names) > 0 {
+		opts = append(opts, agent.WithSkills(reg, names...))
+	}
+	if req.SkillShell {
+		opts = append(opts, agent.WithSkillShellTool(true))
+	}
+	if req.SkillLoad {
+		opts = append(opts, agent.WithLoadSkillTool(true))
+	}
+	return opts
+}
+
 // buildTransferEntry returns the entry agent (triage); use runner.NewRunner(entry, ...) with WithVarStore.
-func buildTransferEntry(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffix string) *agent.Agent {
-	triage := agent.New(nil,
+func buildTransferEntry(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffix string, reg *skill.SkillRegistry) *agent.Agent {
+	triageOpts := []agent.Option{
 		agent.WithName("triage"),
 		agent.WithDescription("Analyzes the user's request and routes to the appropriate specialist."),
 		agent.WithModelName(req.Model),
@@ -244,7 +308,9 @@ func buildTransferEntry(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuf
 Always call transfer to a specialist.`),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
-	)
+	}
+	triageOpts = appendSkillRuntimeOpts(req, reg, triageOpts)
+	triage := agent.New(nil, triageOpts...)
 	runner.ApplyLarkFromConfig(triage, req.APIKey, req.BaseURL, req.Model)
 
 	mathSys := `You are the arithmetic specialist (math_expert). Call tools for every numeric step; never compute mentally.
@@ -267,6 +333,7 @@ Optional: var_set session_note only if the user explicitly asks to store a prefe
 	if len(mcpProf) > 0 {
 		mathOpts = append(mathOpts, agent.WithMCPServerProfiles(mcpProf...))
 	}
+	mathOpts = appendSkillRuntimeOpts(req, reg, mathOpts)
 	mathExpert := agent.New(nil, mathOpts...)
 	mathExpert.ChatModel = triage.ChatModel
 
@@ -286,6 +353,7 @@ Optional: var_set session_note only if the user explicitly asks to store a prefe
 	if len(mcpProf) > 0 {
 		writerOpts = append(writerOpts, agent.WithMCPServerProfiles(mcpProf...))
 	}
+	writerOpts = appendSkillRuntimeOpts(req, reg, writerOpts)
 	writer := agent.New(nil, writerOpts...)
 	writer.ChatModel = triage.ChatModel
 
@@ -337,19 +405,26 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 
 		vstore := materializeVarStore(sessionID, chatReq.Mode)
 
+		reg := getSkillRegistry()
 		var ag agent.Runnable
 		switch chatReq.Mode {
 		case "transfer":
-			ag = runner.NewRunner(buildTransferEntry(&chatReq, mcpProf, mcpSuffix),
+			ag = runner.NewRunner(buildTransferEntry(&chatReq, mcpProf, mcpSuffix, reg),
 				runner.WithMaxTransfers(10),
 				runner.WithLogger(log.Default()),
 				runner.WithVarStore(vstore),
+				runner.WithSkillRegistry(reg),
 			)
 		default:
-			ag = runner.NewRunner(buildSingleAgent(&chatReq, mcpProf, mcpSuffix),
+			entry := buildSingleAgent(&chatReq, mcpProf, mcpSuffix, reg)
+			ropts := []runner.RunOption{
 				runner.WithLogger(log.Default()),
 				runner.WithVarStore(vstore),
-			)
+			}
+			if reg != nil {
+				ropts = append(ropts, runner.WithSkillRegistry(reg))
+			}
+			ag = runner.NewRunner(entry, ropts...)
 		}
 
 		req := &request.RuntimeRequest{
@@ -456,6 +531,41 @@ func runtimeEventToSSE(ev *event.RuntimeEvent) SSEEvent {
 	return out
 }
 
+func handleSkillList(_ context.Context, c *app.RequestContext) {
+	reg := getSkillRegistry()
+	if reg == nil {
+		c.JSON(200, map[string]any{"loaded": false, "generation": uint64(0), "skills": []skill.SkillMeta{}})
+		return
+	}
+	c.JSON(200, map[string]any{
+		"loaded":     true,
+		"generation": reg.Generation(),
+		"skills":     reg.List(),
+	})
+}
+
+func handleRuntimeConfig(_ context.Context, c *app.RequestContext) {
+	out := map[string]any{"skill_paths": skillPathDirs()}
+	reg := getSkillRegistry()
+	if reg == nil {
+		out["skill_loaded"] = false
+		c.JSON(200, out)
+		return
+	}
+	out["skill_loaded"] = true
+	out["skill_generation"] = reg.Generation()
+	out["skills"] = reg.List()
+	c.JSON(200, out)
+}
+
+func handleSkillReload(ctx context.Context, c *app.RequestContext) {
+	if err := reloadSkillRegistry(ctx); err != nil {
+		c.JSON(500, map[string]string{"error": err.Error()})
+		return
+	}
+	handleSkillList(ctx, c)
+}
+
 func main() {
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -463,6 +573,7 @@ func main() {
 	}
 
 	logger := slog.Default()
+	initSkillRegistry(context.Background())
 
 	hlog.SetSilentMode(true)
 	h := server.New(server.WithHostPorts(addr))
@@ -470,6 +581,9 @@ func main() {
 	h.StaticFile("/", "./static/index.html")
 	h.Static("/static", "./static")
 
+	h.GET("/api/skills", handleSkillList)
+	h.GET("/api/runtime-config", handleRuntimeConfig)
+	h.POST("/api/skills/reload", handleSkillReload)
 	h.POST("/api/chat", handleChat(logger))
 
 	logger.Info("loopForge test-server starting", "addr", addr)

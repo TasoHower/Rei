@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/skill"
 	"loopforge/pkg/variable"
 )
 
@@ -18,6 +19,10 @@ type SystemPromptBuildContext struct {
 	Step int
 	// BaseSystemPrompt is Agent.SystemInstructions before any dynamic composition.
 	BaseSystemPrompt string
+	// MCPPromptFragment is reserved for MCP prompts/list injection (empty when not wired).
+	MCPPromptFragment string
+	// ResolvedSkills is the per-run snapshot of skills bound to this loop.
+	ResolvedSkills []skill.SkillSpec
 	// VariablePromptBlock is the VarStore prompt block snapshot before running
 	// SystemPromptBuilder in this step.
 	VariablePromptBlock string

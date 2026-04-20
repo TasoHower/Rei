@@ -2,6 +2,9 @@ package runner
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -210,4 +213,37 @@ func TestRunner_ConcurrentRuns(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestRunner_WithSkillPath_InjectedIntoSystem(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "demo")
+	if err := os.MkdirAll(skillDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	md := filepath.Join(skillDir, "SKILL.md")
+	content := "---\nname: demo\ndescription: Example skill for tests.\n---\n\nBody line.\n"
+	if err := os.WriteFile(md, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cap := &captureSystemChatModel{}
+	ag := agent.New(cap,
+		agent.WithSystemInstructions("base"),
+		agent.WithSkills(nil, "demo"),
+		agent.WithMaxSteps(1),
+	)
+	r := NewRunner(ag, WithSkillPath(dir))
+	ch := r.Run(context.Background(), &request.RuntimeRequest{
+		SessionID:   "skill-path-test",
+		UserMessage: "hi",
+	})
+	collectEvents(ch)
+	sys := cap.LastSystem()
+	if !strings.Contains(sys, "## Skill: demo") {
+		t.Fatalf("missing skill section: %q", sys)
+	}
+	if !strings.Contains(sys, "Body line.") {
+		t.Fatalf("missing body: %q", sys)
+	}
 }

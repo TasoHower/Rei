@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"time"
 
 	"loopforge/pkg/mcp/cfg"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/skill"
 	"loopforge/pkg/tool"
 	"loopforge/pkg/variable"
 )
@@ -35,6 +37,8 @@ type LoopState struct {
 	SuppressBookends   bool // skip Start/Question (already emitted by first agent)
 	// VarStore is shared across transfer hops when set by the Runner.
 	VarStore *variable.VarStore
+	// ExtraSkills holds dynamically loaded skills (e.g. via load_skill tool) for this run.
+	ExtraSkills []skill.SkillSpec
 }
 
 // Agent is a concrete Runnable that drives a tool-calling loop using pkg/model.
@@ -91,6 +95,17 @@ type Agent struct {
 	// If nil, RunLoop uses the default composition strategy.
 	SystemPromptBuilder SystemPromptBuilder
 
+	// SkillNames lists logical skill names to inject (order is preserved). Requires SkillRegistry.
+	SkillNames []string
+	// SkillRegistry resolves SkillNames to loaded SKILL.md specs. Read-only after LoadFromPaths.
+	SkillRegistry *skill.SkillRegistry `json:"-"`
+	// SkillShellTool registers execute_shell_script when true and at least one skill is resolved.
+	SkillShellTool bool
+	// SkillShellTimeout caps execute_shell_script runs. Zero uses the skill package default.
+	SkillShellTimeout time.Duration
+	// LoadSkillTool registers load_skill when true (requires SkillRegistry). Default false.
+	LoadSkillTool bool
+
 	handoffs []*Agent
 }
 
@@ -130,6 +145,14 @@ func (a *Agent) Clone() *Agent {
 		c.MCPServerProfiles = make([]cfg.MCPServerProfile, len(a.MCPServerProfiles))
 		copy(c.MCPServerProfiles, a.MCPServerProfiles)
 	}
+	if a.SkillNames != nil {
+		c.SkillNames = make([]string, len(a.SkillNames))
+		copy(c.SkillNames, a.SkillNames)
+	}
+	c.SkillRegistry = a.SkillRegistry
+	c.SkillShellTool = a.SkillShellTool
+	c.SkillShellTimeout = a.SkillShellTimeout
+	c.LoadSkillTool = a.LoadSkillTool
 	c.mcpStop = nil
 	c.mcpToolInfos = nil
 	c.Variable = a.Variable

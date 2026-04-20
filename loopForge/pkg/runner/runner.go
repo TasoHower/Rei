@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"loopforge/pkg/agent"
 	"loopforge/pkg/log"
@@ -10,6 +11,7 @@ import (
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/skill"
 	"loopforge/pkg/variable"
 )
 
@@ -26,6 +28,12 @@ type Runner struct {
 	maxTransfers int
 	logger       log.Logger
 	varStore     *variable.VarStore
+
+	skillRegistry *skill.SkillRegistry
+	skillPaths    []string
+	pathRegMu     sync.Mutex
+	pathLoadedReg *skill.SkillRegistry
+	pathLoadErr   error
 }
 
 var _ agent.Runnable = (*Runner)(nil)
@@ -101,6 +109,7 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 			r.logger.Debug("run started in single-agent mode",
 				"agent", r.entryAgent.Name,
 			)
+			runID := runIDFrom(req)
 			store := r.varStore
 			if store == nil {
 				store = variable.New()
@@ -108,6 +117,10 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 			st := &agent.LoopState{VarStore: store}
 			exec := r.entryAgent.Clone()
 			applyDefaultLarkIfNeeded(exec)
+			if err := r.prepareAgent(ctx, exec); err != nil {
+				emitRunSetupError(ctx, ch, runID, err.Error())
+				return
+			}
 			exec.RunLoop(ctx, req, ch, nil, st)
 		}
 	}()
@@ -166,6 +179,11 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 	for {
 		a := current.Clone()
 		applyDefaultLarkIfNeeded(a)
+		if err := r.prepareAgent(ctx, a); err != nil {
+			emitError("invalid_config", err.Error())
+			return
+		}
+
 		a.ExtraTools = agent.BuildTransferTools(current)
 		a.ToolInterceptor = agent.IsTransferTool
 		if p := agent.BuildTransferPrompt(current); p != "" {
@@ -268,4 +286,21 @@ func runIDFrom(req *request.RuntimeRequest) string {
 		return req.SessionID
 	}
 	return "run"
+}
+
+func emitRunSetupError(ctx context.Context, ch chan<- *event.RuntimeEvent, runID, msg string) {
+	select {
+	case ch <- event.Emit(runID, 0, &event.ErrorPayload{Code: "invalid_config", Message: msg}):
+	case <-ctx.Done():
+		return
+	}
+	select {
+	case ch <- event.Emit(runID, 0, &event.QueryEndPayload{
+		Outcome: &outcome.RuntimeOutcome{
+			RunID:       runID,
+			Termination: outcome.TerminationError,
+		},
+	}):
+	case <-ctx.Done():
+	}
 }

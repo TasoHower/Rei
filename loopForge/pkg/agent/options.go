@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"time"
+
 	"loopforge/pkg/mcp/cfg"
 	"loopforge/pkg/model"
+	"loopforge/pkg/skill"
 	"loopforge/pkg/tool"
 )
 
@@ -122,5 +125,38 @@ func WithVariable() Option {
 func WithSystemPromptBuilder(fn SystemPromptBuilder) Option {
 	return func(a *Agent) {
 		a.SystemPromptBuilder = fn
+	}
+}
+
+// WithSkills sets the skill registry and the ordered list of logical skill names to inject.
+func WithSkills(reg *skill.SkillRegistry, names ...string) Option {
+	return func(a *Agent) {
+		a.SkillRegistry = reg
+		if len(names) == 0 {
+			a.SkillNames = nil
+			return
+		}
+		a.SkillNames = append([]string(nil), names...)
+	}
+}
+
+// WithSkillShellTool registers execute_shell_script for resolved skills when enabled.
+func WithSkillShellTool(enable bool) Option {
+	return func(a *Agent) {
+		a.SkillShellTool = enable
+	}
+}
+
+// WithSkillShellTimeout sets the timeout for execute_shell_script. Zero keeps the default in pkg/skill.
+func WithSkillShellTimeout(d time.Duration) Option {
+	return func(a *Agent) {
+		a.SkillShellTimeout = d
+	}
+}
+
+// WithLoadSkillTool registers load_skill when true (requires SkillRegistry).
+func WithLoadSkillTool(enable bool) Option {
+	return func(a *Agent) {
+		a.LoadSkillTool = enable
 	}
 }

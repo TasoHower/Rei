@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"sync"
 
 	"loopforge/pkg/agent"
 	modeliface "loopforge/pkg/model/interface"
@@ -65,6 +66,47 @@ func (m mockFinalChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCalling
 }
 
 var _ modeliface.ToolCallingChatModel = mockFinalChatModel{}
+
+// captureSystemChatModel records the last system message content from Generate input.
+type captureSystemChatModel struct {
+	mu         sync.Mutex
+	lastSystem string
+}
+
+func (m *captureSystemChatModel) Stream(ctx context.Context, input []*types.Message, opts ...types.CallOption) (types.MessageStreamReader, error) {
+	msg, err := m.Generate(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return types.NewSliceStreamReader([]*types.Message{msg}), nil
+}
+
+func (m *captureSystemChatModel) Generate(_ context.Context, input []*types.Message, _ ...types.CallOption) (*types.Message, error) {
+	for _, msg := range input {
+		if msg != nil && msg.Role == types.RoleSystem {
+			m.mu.Lock()
+			m.lastSystem = msg.Content
+			m.mu.Unlock()
+			break
+		}
+	}
+	return &types.Message{
+		Role:    types.RoleAssistant,
+		Content: "ok",
+	}, nil
+}
+
+func (m *captureSystemChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+func (m *captureSystemChatModel) LastSystem() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastSystem
+}
+
+var _ modeliface.ToolCallingChatModel = (*captureSystemChatModel)(nil)
 
 func collectEvents(ch <-chan *event.RuntimeEvent) []*event.RuntimeEvent {
 	var events []*event.RuntimeEvent

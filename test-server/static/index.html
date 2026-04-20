@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>loopForge Agent SSE Tester</title>
+  <title>loopForge Skill Runtime 调试</title>
   <style>
     :root {
       --bg: #0f1117;
@@ -431,9 +431,10 @@
 </head>
 <body>
   <header>
-    <h1>loopForge Agent Tester</h1>
-    <span class="badge">SSE Stream</span>
-    <span class="badge" id="modeBadge">Single Agent</span>
+    <h1>loopForge Skill Runtime</h1>
+    <span class="badge">SSE</span>
+    <span class="badge" id="modeBadge">Skill Runtime</span>
+    <span class="badge" id="runtimeBadge" style="font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
   </header>
 
   <div class="container">
@@ -444,14 +445,29 @@
       </div>
       <div class="config-body">
         <!-- mode selector -->
-        <div class="mode-selector">
-          <div class="mode-btn active" id="modeSingle" onclick="setMode('single'); saveConfig();">
+        <div class="mode-selector" style="flex-wrap:wrap;">
+          <div class="mode-btn active" id="modeSkill" onclick="setMode('skill'); saveConfig();">
+            <div>Skill 调试</div>
+            <div class="mode-desc">SKILL.md 注入 system，可选 shell / load_skill</div>
+          </div>
+          <div class="mode-btn" id="modeSingle" onclick="setMode('single'); saveConfig();">
             <div>Single Agent</div>
-            <div class="mode-desc">单 Agent + 四则运算工具</div>
+            <div class="mode-desc">单 Agent + 内置四则 + MCP</div>
           </div>
           <div class="mode-btn" id="modeTransfer" onclick="setMode('transfer'); saveConfig();">
-            <div>Transfer (Handoff)</div>
-            <div class="mode-desc">triage → math_expert（四则） / writer</div>
+            <div>Transfer</div>
+            <div class="mode-desc">triage → math / writer</div>
+          </div>
+        </div>
+
+        <div id="skillFields" class="field full-width" style="margin-top:10px;">
+          <label>Skill 名称（逗号分隔，留空则默认 demo）</label>
+          <input id="skillNames" type="text" placeholder="demo" />
+          <div class="hint">服务端从 <code>./skills</code> 与 <code>LOOPFORGE_SKILL_PATH</code> 扫描 SKILL.md</div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;">
+            <label><input type="checkbox" id="chkSkillShell" checked /> 注册 execute_shell_script（Skill 调试默认开启，否则模型看不到该工具）</label>
+            <label><input type="checkbox" id="chkSkillLoad" /> 注册 load_skill（需 Runner LoopState，单 Agent 有效）</label>
+            <label><input type="checkbox" id="chkShowSystem" /> LLM 轮显示完整 system prompt</label>
           </div>
         </div>
 
@@ -514,21 +530,21 @@
             </div>
           </div>
 
-          <div class="field full-width" id="systemPromptField">
-            <label>System Prompt <span style="font-weight:400;color:var(--text-dim)">(仅 Single 模式)</span></label>
-            <textarea id="cfgSystemPrompt" placeholder="留空使用默认：var_set + MCP 四则运算（单 Agent）"></textarea>
+          <div class="field full-width" id="systemPromptField" style="display:none;">
+            <label>System Prompt <span style="font-weight:400;color:var(--text-dim)">(Single 模式可改；Skill 模式用服务端默认)</span></label>
+            <textarea id="cfgSystemPrompt" placeholder="留空使用默认"></textarea>
           </div>
         </div>
       </div>
     </div>
 
     <div id="chatArea">
-      <div class="empty-state" id="emptyState">配置 API Key 后输入消息开始对话</div>
+      <div class="empty-state" id="emptyState">配置 API Key 后：可输入 <code>:help</code> 查看命令，或直接输入自然语言跑一轮 Runtime</div>
     </div>
 
     <div class="input-area">
-      <input id="messageInput" type="text" placeholder="例如：分步计算 (128+256)÷4×2，每步调用工具"
-             value="【四则运算测试】请分步计算 (128 + 256) ÷ 4 × 2，每一步用工具，最后给出结果。" />
+      <input id="messageInput" type="text" placeholder=":help | :list | :reload 或 自然语言 / 模型指令"
+             value="请用一句话说明当前 system 里是否能看到 ## Skill: demo 段落。" />
       <button id="sendBtn" onclick="sendMessage()">发送</button>
     </div>
   </div>
@@ -542,9 +558,11 @@
     let currentAnswerBubble = null;
     let currentAgentName = null;
     let lastSenderIsAgent = false;
-    let currentMode = 'single';
+    let currentMode = 'skill';
+    let pendingShowSystem = false;
 
     const defaultMessages = {
+      skill: '请说明当前 system 中是否出现 ## Skill: demo，并一句话概括该 skill 的正文用途。',
       single: '【四则运算测试】请分步计算 (128 + 256) ÷ 4 × 2，每一步用工具，最后给出结果。',
       transfer: '【四则运算测试】请分步计算 (19 + 23) × 2 - 15 ÷ 3。交给算术专家逐步调用工具，最后一句话说明结果。'
     };
@@ -595,7 +613,10 @@
           else if (m.allowlist != null) document.getElementById('mcpAllowlist').value = m.allowlist;
         }
         if (saved.mode) setMode(saved.mode);
-      } catch {}
+        else setMode('skill');
+      } catch {
+        setMode('skill');
+      }
       syncMCPModeUI();
     }
     function saveConfig() { localStorage.setItem(STORAGE_KEY, JSON.stringify(getConfig())); }
@@ -606,8 +627,13 @@
         model: document.getElementById('cfgModel').value.trim(),
         base_url: document.getElementById('cfgBaseURL').value.trim(),
         system_prompt: document.getElementById('cfgSystemPrompt').value.trim(),
-        mode: currentMode,
+        mode: currentMode === 'skill' ? 'single' : currentMode,
         mcp_mode: mode,
+        skill_debug: currentMode === 'skill',
+        skill_names: (document.getElementById('skillNames')?.value || '').split(/[,，]/).map(s => s.trim()).filter(Boolean),
+        skill_shell: !!document.getElementById('chkSkillShell')?.checked,
+        skill_load: !!document.getElementById('chkSkillLoad')?.checked,
+        show_system_prompt: !!document.getElementById('chkShowSystem')?.checked,
       };
       if (mode === 'custom') {
         o.mcp = {
@@ -623,6 +649,26 @@
     }
     loadSavedConfig();
 
+    async function fetchRuntimeBanner() {
+      try {
+        const r = await fetch('/api/runtime-config');
+        const j = await r.json();
+        const el = document.getElementById('runtimeBadge');
+        if (!el) return;
+        if (j.skill_loaded) {
+          const n = (j.skills && j.skills.length) || 0;
+          el.textContent = 'registry: ' + n + ' skills · gen ' + (j.skill_generation || 0);
+        } else {
+          el.textContent = 'registry: empty';
+        }
+        el.title = (j.skill_paths || []).join('\n');
+      } catch (e) {
+        const el = document.getElementById('runtimeBadge');
+        if (el) el.textContent = 'registry: ?';
+      }
+    }
+    fetchRuntimeBanner();
+
     document.querySelectorAll('input[name="mcpMode"]').forEach(el => {
       el.addEventListener('change', () => { syncMCPModeUI(); saveConfig(); });
     });
@@ -635,13 +681,19 @@
 
     function setMode(mode) {
       currentMode = mode;
+      document.getElementById('modeSkill').classList.toggle('active', mode === 'skill');
       document.getElementById('modeSingle').classList.toggle('active', mode === 'single');
       document.getElementById('modeTransfer').classList.toggle('active', mode === 'transfer');
-      document.getElementById('modeBadge').textContent = mode === 'transfer' ? 'Transfer Mode' : 'Single Agent';
-      document.getElementById('systemPromptField').style.display = mode === 'transfer' ? 'none' : 'block';
+      let badge = 'Single Agent';
+      if (mode === 'skill') badge = 'Skill Runtime';
+      else if (mode === 'transfer') badge = 'Transfer';
+      document.getElementById('modeBadge').textContent = badge;
+      const sf = document.getElementById('skillFields');
+      if (sf) sf.style.display = mode === 'skill' ? 'block' : 'none';
+      document.getElementById('systemPromptField').style.display = mode === 'single' ? 'block' : 'none';
 
       if (!messageInput.dataset.userEdited) {
-        messageInput.value = defaultMessages[mode] || defaultMessages.single;
+        messageInput.value = defaultMessages[mode] || defaultMessages.skill;
       }
     }
 
@@ -740,9 +792,52 @@
 
     function scroll() { chatArea.scrollTop = chatArea.scrollHeight; }
 
+    async function runRuntimeCommand(raw) {
+      const rest = raw.slice(1).trim();
+      const cmd = (rest.split(/\s+/)[0] || '').toLowerCase();
+      emptyState?.remove();
+      addUserBubble(raw);
+      if (cmd === 'help') {
+        addSysInfo('llm', 'CMD',
+          ':help 帮助 · :list GET /api/skills · :reload POST 重载 · 其它输入走 LLM（需 API Key）');
+        return;
+      }
+      if (cmd === 'list') {
+        try {
+          const r = await fetch('/api/skills');
+          const j = await r.json();
+          addSysInfo('done', 'SKILLS', escapeHtml(JSON.stringify(j, null, 2)).slice(0, 12000));
+        } catch (e) {
+          addSysInfo('err', 'ERR', escapeHtml(String(e)));
+        }
+        return;
+      }
+      if (cmd === 'reload') {
+        try {
+          const r = await fetch('/api/skills/reload', { method: 'POST' });
+          const j = await r.json();
+          if (!r.ok) {
+            addSysInfo('err', 'ERR', escapeHtml(j.error || ('HTTP ' + r.status)));
+            return;
+          }
+          addSysInfo('done', 'RELOAD', escapeHtml(JSON.stringify(j, null, 2)).slice(0, 8000));
+          fetchRuntimeBanner();
+        } catch (e) {
+          addSysInfo('err', 'ERR', escapeHtml(String(e)));
+        }
+        return;
+      }
+      addSysInfo('err', 'CMD', '未知命令，使用 :help');
+    }
+
     function sendMessage() {
       const message = messageInput.value.trim();
       if (!message) return;
+      if (message.startsWith(':')) {
+        messageInput.value = '';
+        runRuntimeCommand(message);
+        return;
+      }
       const cfg = getConfig();
       if (!cfg.api_key) { alert('请先填写 API Key'); return; }
       if (cfg.mcp_mode === 'custom') {
@@ -769,6 +864,7 @@
       sendBtn.disabled = true;
       messageInput.value = '';
       messageInput.dataset.userEdited = '';
+      pendingShowSystem = !!cfg.show_system_prompt;
 
       fetch('/api/chat', {
         method: 'POST',
@@ -833,10 +929,16 @@
           scroll();
           break;
 
-        case 'call_llm_start':
+        case 'call_llm_start': {
           sealAgentBubble();
-          addSysInfo('llm', 'LLM', escapeHtml(data.model || ''));
+          let detail = escapeHtml(data.model || '');
+          if (pendingShowSystem && data.system_prompt) {
+            const sp = String(data.system_prompt);
+            detail += '\n\n--- system_prompt ---\n' + escapeHtml(sp.length > 24000 ? sp.slice(0, 24000) + '…' : sp);
+          }
+          addSysInfo('llm', 'LLM', detail);
           break;
+        }
 
         case 'call_llm_end': {
           sealAgentBubble();

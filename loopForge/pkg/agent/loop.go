@@ -8,6 +8,7 @@ import (
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
+	"loopforge/pkg/skill"
 	"loopforge/pkg/variable"
 )
 
@@ -79,9 +80,32 @@ func (a *Agent) RunLoop(
 	ctx = variable.NewContext(ctx, vstore)
 	baseSystem := a.SystemInstructions
 
+	resolvedSkills, skillErr := a.resolveSkills()
+	if skillErr != nil {
+		emitError("invalid_config", skillErr.Error(), 0)
+		return nil
+	}
+
 	var varTools []*model.ToolInfo
 	if a.Variable {
-		varTools = []*model.ToolInfo{variable.VarSetTool(vstore)}
+		varTools = append(varTools, variable.VarSetTool(vstore))
+	}
+	if a.SkillShellTool && a.SkillRegistry != nil {
+		r := &skill.ShellSkillJobRunner{}
+		if a.SkillShellTimeout > 0 {
+			r.Timeout = a.SkillShellTimeout
+		}
+		varTools = append(varTools, skill.ShellTool(a.SkillRegistry, r))
+	}
+	if a.LoadSkillTool && a.SkillRegistry != nil && state != nil {
+		varTools = append(varTools, skill.LoadSkillTool(a.SkillRegistry, func(sp skill.SkillSpec) {
+			for _, ex := range state.ExtraSkills {
+				if ex.Name == sp.Name {
+					return
+				}
+			}
+			state.ExtraSkills = append(state.ExtraSkills, sp)
+		}))
 	}
 
 	m, setupErr := a.bindModel(ctx, varTools...)
@@ -132,7 +156,8 @@ func (a *Agent) RunLoop(
 			msgs = replaceFirstUserMessage(msgs, userStep)
 		}
 
-		fullSystem, err := a.runLoopFullSystem(ctx, req, vstore, baseSystem, step, runID)
+		mergedSkills := mergeSkillLists(resolvedSkills, state)
+		fullSystem, err := a.runLoopFullSystem(ctx, req, vstore, baseSystem, step, runID, mergedSkills)
 		if err != nil {
 			emitError("system_prompt_builder", err.Error(), step)
 			return nil
@@ -233,13 +258,14 @@ func (a *Agent) runLoopFullSystem(
 	baseSystem string,
 	step int,
 	runID string,
+	resolvedSkills []skill.SkillSpec,
 ) (string, error) {
 	blockBeforeBuilder := ""
 	if a.Variable {
 		blockBeforeBuilder = vstore.PromptBlock()
 	}
 
-	full := baseSystem
+	var full string
 	if a.SystemPromptBuilder != nil {
 		sb := SystemPromptBuildContext{
 			Ctx:                 ctx,
@@ -248,6 +274,8 @@ func (a *Agent) runLoopFullSystem(
 			Agent:               a,
 			Step:                step,
 			BaseSystemPrompt:    baseSystem,
+			MCPPromptFragment:   "",
+			ResolvedSkills:      resolvedSkills,
 			VariablePromptBlock: blockBeforeBuilder,
 		}
 		var err error
@@ -255,6 +283,9 @@ func (a *Agent) runLoopFullSystem(
 		if err != nil {
 			return "", err
 		}
+	} else {
+		// Default merge order: base system, MCP prompt fragment (reserved), then skills.
+		full = skill.ComposeSystemSegments(baseSystem, "", resolvedSkills)
 	}
 
 	block := ""

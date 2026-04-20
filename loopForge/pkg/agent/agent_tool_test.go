@@ -2,12 +2,12 @@ package agent
 
 import (
 	"context"
-	"github.com/bytedance/sonic"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"testing"
 
-	modeliface "loopforge/pkg/model/interface"
 	"loopforge/pkg/model"
+	modeliface "loopforge/pkg/model/interface"
 	"loopforge/pkg/model/types"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"

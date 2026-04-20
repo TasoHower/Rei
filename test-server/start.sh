@@ -11,6 +11,7 @@ echo "==> building test-server ..."
 go build -o ./bin/test-server .
 
 echo "==> starting on http://localhost:${PORT}"
+echo "    Skill Runtime demo: place SKILL.md under ./skills (see ./skills/demo), optional LOOPFORGE_SKILL_PATH"
 
 # macOS: open browser after server is ready
 (

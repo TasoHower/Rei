@@ -1,6 +1,10 @@
 package main
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 // Environment variables for Volcengine Ark (Lark LLM) via volcengine-go-sdk.
 // Primary names use LARK_*; DOUBAO_* / ARK_* remain as fallbacks.
@@ -16,6 +20,9 @@ const (
 	EnvArkModel      = "ARK_MODEL"
 	EnvDoubaoBaseURL = "DOUBAO_BASE_URL"
 	EnvUseMock       = "LOOPFORGE_USE_MOCK"
+	// EnvSkillPath is a PATH-style list (OS-specific separator) of directories scanned for SKILL.md.
+	// Used by integrations built on loopforge/pkg/runner WithSkillPath; see doc/design/multi-agent-engine.md §3.6.
+	EnvSkillPath = "LOOPFORGE_SKILL_PATH"
 )
 
 // DefaultLarkBaseURL is the Beijing region Ark API v3 base URL (no trailing slash).
@@ -59,4 +66,13 @@ func firstString(vals ...string) string {
 func UseMock() bool {
 	v := os.Getenv(EnvUseMock)
 	return v == "1" || v == "true" || v == "yes"
+}
+
+// SkillPathDirs returns directories from LOOPFORGE_SKILL_PATH (split with filepath.SplitList).
+func SkillPathDirs() []string {
+	raw := strings.TrimSpace(os.Getenv(EnvSkillPath))
+	if raw == "" {
+		return nil
+	}
+	return filepath.SplitList(raw)
 }

@@ -238,7 +238,7 @@ type AgentSkillOptions struct {
 | **执行 Skill** | **装载 + 注入上下文**，让模型在 **tool loop** 中按 skill 文本行动；**执行**的主体是 **模型 + 已有 Tool**。 |
 | **执行代码** | 通过 **`SkillJobRunner`** 受控执行 `scripts/`；必须经过完整性校验与运行策略（allowlist、timeout、sandbox）。禁止把 `SKILL.md` 正文当脚本直接解释执行。 |
 
-**阶段取舍（v0.7.0）**：采用 **frontmatter 首阶段加载 → 按需加载正文/资源 → 受控执行 scripts**。脚本执行必须走 **`SkillJobKind` + `SkillJobRouter`** 的显式路由，不从文本猜测。具体见 **`doc/log/progress-v0.7.0.md`**（**§1.2 脚本语言与执行器选择**、**§1.3 目录与完整性检查**、代码改造 **§11**）。
+**阶段取舍（v0.7.0）**：采用 **frontmatter 首阶段加载 → 按需加载正文/资源 → 受控执行 scripts**。脚本执行走 **`SkillJob` + `SkillJobRunner`**（默认 **shell**）以及模型可见的 **`execute_shell_script`**，不从 `SKILL.md` 正文直接解释执行。具体见 **`doc/log/progress-v0.7.0.md`**（**§1.2**、**§1.3**、代码改造 **§11**）与 **`doc/acceptance/v0.7.0-acceptance.md`**。
 
 ```mermaid
 flowchart LR
@@ -262,6 +262,20 @@ flowchart LR
 ```
 
 **实现计划**：`doc/log/progress-v0.7.0.md`（版本 **v0.7.0**）。**解析与类型**：`SkillFrontmatter`、`ParsedSkillFile`、`SkillSpec`、`SkillMeta` 及解析管线见该文档 **§1.1**；**目录规范与完整性检查**（`SKILL.md` + 可选 `scripts/`/`references/`/`assets/`、`SkillBundleManifest`、哈希校验）见 **§1.3**；**`pkg/skill` 枚举常量禁止使用 `iota`**（须显式赋值），见同文档 **「编码约定」**。
+
+**实现状态（代码落点，v0.7.0）**：
+
+| 能力 | 位置 / 说明 |
+|------|----------------|
+| 解析与注册表 | `loopforge/pkg/skill`：`ParseSKILLFile`、`SkillRegistry.LoadFromPaths`、`ValidateSkillBindings` |
+| 合并顺序 | `loopforge/pkg/skill.ComposeSystemSegments`；默认在 `pkg/agent` 的 `runLoopFullSystem` 中于 Variable 块之前应用；`SystemPromptBuildContext.MCPPromptFragment` 预留给 MCP prompts |
+| Agent / Option | `loopforge/pkg/agent`：`WithSkills`、`WithSkillShellTool`、`WithLoadSkillTool`、`SkillNames`、`SkillRegistry` |
+| Runner | `loopforge/pkg/runner`：`WithSkillRegistry`、`WithSkillPath`（惰性加载并注入 registry） |
+| 脚本执行 | `execute_shell_script` → `skill.ShellTool` + `ShellSkillJobRunner`（`/bin/sh`，bundle 内相对路径） |
+| 动态加载 | `load_skill` → `skill.LoadSkillTool`，追加到 `LoopState.ExtraSkills`（需显式 `WithLoadSkillTool(true)`） |
+| 观测 | `slog` 审计；OTel tracer `loopforge/skill`（`skill.registry.load` / `skill.parse`） |
+| 示例 SKILL.md | `examples/skills/demo/SKILL.md`；CLI 辅助：`cmd/loopforged` 的 `LOOPFORGE_SKILL_PATH` / `SkillPathDirs()` |
+| 验收 | `doc/acceptance/v0.7.0-acceptance.md` |
 
 ### 3.7 MCP 接入（多 Server、工具与资源）
 
