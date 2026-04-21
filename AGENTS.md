@@ -21,10 +21,11 @@
 
 ### 标准工作流程
 
-1. **Step 1** — 需求分析 + 版本草案（只读）
-2. **Step 2** — 实施 Plan（只读，`plan` 落盘）
-3. **Step 3** — 编码实施（允许写入）
-4. **Step 4** — Commit 文案（最后确认）
+1. **Step 1** — 需求分析 + 写入 `doc/PRD/`
+2. **Step 2** — 生成计划（`doc/plan/plan-v*.md`）
+3. **Step 3** — 实施代码并更新版本日志（`doc/log/progress-v*.md`）
+4. **Step 4** — 验收代码（`doc/acceptance/v0.7.0-acceptance.md`）
+5. **Step 5** — 提交代码（`git commit`）
 
 **未经用户明确确认，不得进入下一步。**
 

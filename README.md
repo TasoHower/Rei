@@ -91,14 +91,36 @@ Rei 的目标是构建一套**完整的 Go 原生 AI Agent 基础设施**——�
 
 ## 技术栈
 
-| 组件 | 技术 |
+与上文 **项目结构** 对齐，按子项目归纳；跨组件共用的能力单独列出。
+
+### 语言与 LLM
+
+| 类别 | 技术 |
 |------|------|
-| 语言 | Go |
-| Agent 引擎 | agent-sdk-go |
-| RAG 编排 | Eino compose.Graph (CloudWeGo) |
-| MCP 协议 | MCP Go SDK |
-| 向量数据库 | Qdrant (gRPC) |
-| 关系数据库 | MySQL 8.4 |
-| 缓存 | Redis 7 |
-| HTTP 框架 | Hertz (CloudWeGo) |
-| LLM Provider | OpenAI / Lark (Volcengine Ark) |
+| 语言 | Go（各子模块版本见对应 `go.mod`） |
+| LLM 接入 | OpenAI 兼容 API；火山引擎 Ark（Lark，`volcengine-go-sdk`） |
+
+### loopForge（Multi-Agent 运行时）
+
+| 类别 | 技术 |
+|------|------|
+| 默认 Agent 循环与工具（非必要） | agent-sdk-go |
+| MCP 客户端 | MCP Go SDK（`modelcontextprotocol/go-sdk`） |
+| Skills | `SKILL.md` 解析、注册表与 system 注入 |
+| 可观测性 | OpenTelemetry（trace / metrics） |
+
+### SeRagLF（Self-RAG MCP Server）
+
+| 类别 | 技术 |
+|------|------|
+| RAG / 工作流编排 | CloudWeGo Eino `compose.Graph` |
+| 向量检索 | Qdrant（gRPC） |
+| 关系型数据 | MySQL 8.4 |
+| 缓存与短期记忆 | Redis 7 |
+
+### test-server（调试网关）
+
+| 类别 | 技术 |
+|------|------|
+| HTTP 与流式响应 | Hertz（CloudWeGo）、SSE |
+
