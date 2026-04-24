@@ -458,6 +458,10 @@
             <div>Transfer</div>
             <div class="mode-desc">triage → math / writer</div>
           </div>
+          <div class="mode-btn" id="modeSpawn" onclick="setMode('spawn'); saveConfig();">
+            <div>Spawn</div>
+            <div class="mode-desc">子 Agent 子任务（spawn_subagent），仅内置四则，不用 MCP</div>
+          </div>
         </div>
 
         <div id="skillFields" class="field full-width" style="margin-top:10px;">
@@ -564,7 +568,8 @@
     const defaultMessages = {
       skill: '请说明当前 system 中是否出现 ## Skill: demo，并一句话概括该 skill 的正文用途。',
       single: '【四则运算测试】请分步计算 (128 + 256) ÷ 4 × 2，每一步用工具，最后给出结果。',
-      transfer: '【四则运算测试】请分步计算 (19 + 23) × 2 - 15 ÷ 3。交给算术专家逐步调用工具，最后一句话说明结果。'
+      transfer: '【四则运算测试】请分步计算 (19 + 23) × 2 - 15 ÷ 3。交给算术专家逐步调用工具，最后一句话说明结果。',
+      spawn: '【spawn 演示】请用 spawn_subagent 把子任务「计算 7*8+3」交给子 Agent；工具返回的 JSON 读完后，用自然语言向用户说明结果。'
     };
 
     const STORAGE_KEY = 'loopforge-config';
@@ -684,13 +689,18 @@
       document.getElementById('modeSkill').classList.toggle('active', mode === 'skill');
       document.getElementById('modeSingle').classList.toggle('active', mode === 'single');
       document.getElementById('modeTransfer').classList.toggle('active', mode === 'transfer');
+      const ms = document.getElementById('modeSpawn');
+      if (ms) ms.classList.toggle('active', mode === 'spawn');
       let badge = 'Single Agent';
       if (mode === 'skill') badge = 'Skill Runtime';
       else if (mode === 'transfer') badge = 'Transfer';
+      else if (mode === 'spawn') badge = 'Spawn';
       document.getElementById('modeBadge').textContent = badge;
       const sf = document.getElementById('skillFields');
       if (sf) sf.style.display = mode === 'skill' ? 'block' : 'none';
-      document.getElementById('systemPromptField').style.display = mode === 'single' ? 'block' : 'none';
+      const showSys = mode === 'single' || mode === 'spawn';
+      const spf = document.getElementById('systemPromptField');
+      if (spf) spf.style.display = showSys ? 'block' : 'none';
 
       if (!messageInput.dataset.userEdited) {
         messageInput.value = defaultMessages[mode] || defaultMessages.skill;

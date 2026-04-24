@@ -5,6 +5,7 @@ import (
 
 	"loopforge/pkg/mcp/cfg"
 	"loopforge/pkg/model"
+	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/skill"
 	"loopforge/pkg/tool"
 )
@@ -158,5 +159,19 @@ func WithSkillShellTimeout(d time.Duration) Option {
 func WithLoadSkillTool(enable bool) Option {
 	return func(a *Agent) {
 		a.LoadSkillTool = enable
+	}
+}
+
+// WithSpawn sets SpawnEnabled and ChildAgentBuilder on the Agent. The model-facing name
+// for the builtin is configured as defaults.BuiltinSpawnToolName in package internal/defaults.
+func WithSpawn(childBuilder func(*exchange.SpawnSpec) *Agent) Option {
+	return func(a *Agent) {
+		if childBuilder == nil {
+			a.SpawnEnabled = false
+			a.ChildAgentBuilder = nil
+			return
+		}
+		a.SpawnEnabled = true
+		a.ChildAgentBuilder = childBuilder
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"loopforge/internal/defaults"
 	lferrors "loopforge/pkg/errors"
 	"loopforge/pkg/mcp"
 	"loopforge/pkg/model"
@@ -72,6 +73,16 @@ func (a *Agent) bindModel(ctx context.Context, extraRuntimeTools ...*model.ToolI
 		return m, nil
 	}
 	return a.ChatModel, nil
+}
+
+// resolveSpawnMaxDepth returns the maximum allowed [exchange.RunRef.Depth] of a
+// *new* child (reject when parentDepth+1 >= this value, using defaults and request override).
+func resolveSpawnMaxDepth(req *request.RuntimeRequest) int {
+	d := defaults.SpawnMaxDepthDefault
+	if req != nil && req.Options.SpawnMaxDepth != nil && *req.Options.SpawnMaxDepth > 0 {
+		d = *req.Options.SpawnMaxDepth
+	}
+	return d
 }
 
 // resolveMaxSteps determines the effective max loop iterations from the

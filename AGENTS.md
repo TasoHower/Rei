@@ -7,14 +7,15 @@
 | 文件 | 作用 | 应用范围 |
 |------|------|----------|
 | `.cursor/rules/rei-gated-workflow.mdc` | **门禁流程** — 分析 → Plan → 编码 → commit；未经确认不得写入 | `alwaysApply: true` |
-| `.cursor/rules/rei-doc-mandatory.mdc` | **文档规范** — `doc/packages/` 六段、`plan` 落盘、`progress-*.md` 体例 | `alwaysApply: true` |
+| `.cursor/rules/rei-doc-mandatory.mdc` | **文档规范** — `doc/plan/plan-v*.md` 与 `doc/log` 配套、`doc/packages/` 六段、`progress-*.md` 体例 | `alwaysApply: true` |
+| `.cursor/rules/rei-loopforge.mdc` | **loopForge** — v0.8.0 **spawn** 与 `doc/plan` 执行顺序 | `globs: loopForge/**` |
 | `.cursor/rules/rei-go.mdc` | **Go 编码** — 风格、禁止 `iota`、错误处理、分层约定 | `globs: **/*.go` |
 
 详细说明见 **`.cursor/rules/README.md`**。
 
 ## 仓库结构（实际）
 
-- 各**顶层模块**（例如 `loopForge/`）自带 **`doc/`**（例如 `loopForge/doc/log/progress-v*.md`）。
+- 各**顶层模块**（例如 `loopForge/`）自带 **`doc/`**（例如 `loopForge/doc/plan/plan-v*.md`、`loopForge/doc/log/progress-v*.md`）。
 - **没有**覆盖全仓库的单一根目录 `doc/`；以各模块 `doc/` 为准。
 
 ## 快速参考
@@ -22,7 +23,7 @@
 ### 标准工作流程
 
 1. **Step 1** — 需求分析 + 写入 `doc/PRD/`
-2. **Step 2** — 生成计划（`doc/plan/plan-v*.md`）
+2. **Step 2** — 生成计划：各顶模块 `doc/plan/plan-v*.md`（**实施拆分**）并与 `doc/log/progress-v*.md` 配套，**先 plan 后编码**
 3. **Step 3** — 实施代码并更新版本日志（`doc/log/progress-v*.md`）
 4. **Step 4** — 验收代码（`doc/acceptance/v0.7.0-acceptance.md`）
 5. **Step 5** — 提交代码（`git commit`）
@@ -32,6 +33,7 @@
 ### 文档要求
 
 - **包文档**：`doc/packages/{module}-{path}.md`，必须包含六段结构
+- **实施计划**：`doc/plan/plan-v*.md`（任务分阶段、**先于编码**），与 `doc/log/progress-v*.md` 配套
 - **版本计划**：`doc/log/progress-v*.md`，对齐 v0.7.0 体例
 - **Plan 落盘**：任何 Plan 必须写入文件，不得仅在聊天中
 
@@ -54,4 +56,5 @@
 ## 相关文档
 
 - `.cursor/rules/README.md` — 规则目录说明
+- `loopForge/doc/plan/plan-v0.8.0.md` — v0.8.0 实施计划（spawn）
 - `loopForge/doc/log/progress-v0.7.0.md` — 版本计划参考体例

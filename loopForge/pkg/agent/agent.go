@@ -7,6 +7,7 @@ import (
 	"loopforge/pkg/mcp/cfg"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
+	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 	"loopforge/pkg/skill"
@@ -39,6 +40,8 @@ type LoopState struct {
 	VarStore *variable.VarStore
 	// ExtraSkills holds dynamically loaded skills (e.g. via load_skill tool) for this run.
 	ExtraSkills []skill.SkillSpec
+	// CurrentRunRef, when set by the Runner, identifies this loop for spawn depth and RunID.
+	CurrentRunRef *exchange.RunRef
 }
 
 // Agent is a concrete Runnable that drives a tool-calling loop using pkg/model.
@@ -106,6 +109,13 @@ type Agent struct {
 	// LoadSkillTool registers load_skill when true (requires SkillRegistry). Default false.
 	LoadSkillTool bool
 
+	// SpawnEnabled, when true and [ChildAgentBuilder] is set, may register `spawn_subagent` for this run.
+	SpawnEnabled bool
+	// ChildAgentBuilder materializes a child [Agent] from a [SpawnSpec] (e.g. Clone and tune).
+	ChildAgentBuilder func(*exchange.SpawnSpec) *Agent
+	// Spawner runs child loops; if nil, [RunLoop] uses a [defaultSpawner] built from this agent.
+	Spawner Spawner
+
 	handoffs []*Agent
 }
 
@@ -157,6 +167,9 @@ func (a *Agent) Clone() *Agent {
 	c.mcpToolInfos = nil
 	c.Variable = a.Variable
 	c.SystemPromptBuilder = a.SystemPromptBuilder
+	c.SpawnEnabled = a.SpawnEnabled
+	c.ChildAgentBuilder = a.ChildAgentBuilder
+	c.Spawner = a.Spawner
 	return &c
 }
 

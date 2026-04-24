@@ -3,7 +3,7 @@ package defaults
 // Loop and run limits (I-phase baseline; tune in later milestones).
 const (
 	MaxStepsDefault            = 64
-	SpawnMaxDepthDefault       = 3
+	SpawnMaxDepthDefault       = 2
 	MaxConcurrentSpawnsDefault = 4
 )
 

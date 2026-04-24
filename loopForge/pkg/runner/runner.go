@@ -9,6 +9,7 @@ import (
 	"loopforge/pkg/log"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
+	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 	"loopforge/pkg/skill"
@@ -114,7 +115,10 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 			if store == nil {
 				store = variable.New()
 			}
-			st := &agent.LoopState{VarStore: store}
+			st := &agent.LoopState{
+				VarStore:      store,
+				CurrentRunRef: &exchange.RunRef{RunID: runID, Depth: 0},
+			}
 			exec := r.entryAgent.Clone()
 			applyDefaultLarkIfNeeded(exec)
 			if err := r.prepareAgent(ctx, exec); err != nil {
@@ -195,6 +199,7 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 			TransferChain:      transferChain,
 			SuppressBookends:   !firstAgent,
 			VarStore:           runStore,
+			CurrentRunRef:      &exchange.RunRef{RunID: runID, Depth: 0},
 		}
 
 		r.logger.Debug("agent executing",

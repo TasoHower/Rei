@@ -6,6 +6,7 @@ import (
 	"loopforge/pkg/log"
 	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
+	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 	"loopforge/pkg/skill"
@@ -106,6 +107,14 @@ func (a *Agent) RunLoop(
 			}
 			state.ExtraSkills = append(state.ExtraSkills, sp)
 		}))
+	}
+
+	effectiveRef := &exchange.RunRef{RunID: runID, Depth: 0}
+	if state != nil && state.CurrentRunRef != nil {
+		effectiveRef = state.CurrentRunRef
+	}
+	if t := buildSpawnSubagentVarTool(effectiveRef, a, req, state); t != nil {
+		varTools = append(varTools, t)
 	}
 
 	m, setupErr := a.bindModel(ctx, varTools...)

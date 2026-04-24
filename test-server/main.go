@@ -24,6 +24,7 @@ import (
 	larkadapter "loopforge/pkg/model/adapters/lark"
 	"loopforge/pkg/runner"
 	"loopforge/pkg/runtime/event"
+	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/runtime/request"
 	"loopforge/pkg/skill"
 	"loopforge/pkg/variable"
@@ -40,6 +41,9 @@ After finishing, reply briefly and confirm what you set or computed.`
 	defaultSkillDebugSystemPrompt = `You are the loopForge Skill Runtime debugger (single-agent). Loaded skills appear as markdown sections ## Skill: <name> in the system prompt.
 Follow skill text when it applies. Use built-in add/subtract/multiply/divide tools for arithmetic when MCP tools are not available.
 Use var_set only when testing the variable store. If execute_shell_script or load_skill are listed, use them only as allowed by the skill and tool descriptions.`
+	defaultSpawnSystemPrompt = `You are the loopForge test assistant in spawn demo mode.
+
+**spawn_subagent** runs an isolated sub-agent (same four-function math tools) and returns JSON. Call it with: {"task": "<concrete subtask, e.g. a calculation>"}. Read the result and explain briefly to the user. Prefer spawn_subagent for self-contained arithmetic the user can treat as a separate step; for simple follow-ups in the same context you may answer without spawning.`
 )
 
 // ChatRequest is the JSON body for POST /api/chat.
@@ -50,7 +54,7 @@ type ChatRequest struct {
 	BaseURL      string `json:"base_url,omitempty"`
 	Model        string `json:"model,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`
-	Mode         string `json:"mode,omitempty"` // "single" (default) or "transfer"
+	Mode         string `json:"mode,omitempty"` // "single" (default), "transfer", or "spawn"
 
 	// MCPMode: "env" (default) uses server env defaults; "off" disables MCP; "custom" uses MCP.
 	MCPMode string     `json:"mcp_mode,omitempty"`
@@ -86,7 +90,11 @@ func (r *ChatRequest) resolveDefaults() {
 		if r.SkillDebug {
 			r.SystemPrompt = defaultSkillDebugSystemPrompt
 		} else {
-			r.SystemPrompt = defaultSystemPrompt
+			if r.Mode == "spawn" {
+				r.SystemPrompt = defaultSpawnSystemPrompt
+			} else {
+				r.SystemPrompt = defaultSystemPrompt
+			}
 		}
 	}
 	if r.Mode == "" {
@@ -280,6 +288,53 @@ func buildSingleAgent(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffi
 	return a
 }
 
+// buildSpawnAgent is the spawn demo entry: no MCP (built-in add/subtract/multiply/divide only);
+// parent may call spawn_subagent; child runs in a separate RunLoop.
+func buildSpawnAgent(req *ChatRequest, reg *skill.SkillRegistry) *agent.Agent {
+	subSys := `You are a temporary sub-agent for a single subtask. Use only the built-in tools add, subtract, multiply, and divide for all numeric work. Keep the final reply to one or two short sentences.`
+	childOpts := []agent.Option{
+		agent.WithName("spawn-child"),
+		agent.WithModelName(req.Model),
+		agent.WithMaxSteps(8),
+		agent.WithSystemInstructions(subSys),
+		agent.WithCallOptions(model.WithTemperature(0.1)),
+		agent.WithVariable(),
+		agent.WithToolInfos(mathToolInfos()),
+	}
+	childOpts = appendSkillRuntimeOpts(req, reg, childOpts)
+	childTmpl := agent.New(nil, childOpts...)
+	runner.ApplyLarkFromConfig(childTmpl, req.APIKey, req.BaseURL, req.Model)
+
+	pSys := req.SystemPrompt
+
+	var spawnFromSpec func(*exchange.SpawnSpec) *agent.Agent
+	spawnFromSpec = func(spec *exchange.SpawnSpec) *agent.Agent {
+		c := childTmpl.Clone()
+		c.SpawnEnabled = spec.AllowChildSpawn
+		if spec.AllowChildSpawn {
+			c.ChildAgentBuilder = spawnFromSpec
+		} else {
+			c.ChildAgentBuilder = nil
+		}
+		return c
+	}
+
+	pOpts := []agent.Option{
+		agent.WithName("spawn-parent"),
+		agent.WithModelName(req.Model),
+		agent.WithMaxSteps(12),
+		agent.WithSystemInstructions(pSys),
+		agent.WithCallOptions(model.WithTemperature(0.1)),
+		agent.WithVariable(),
+		agent.WithToolInfos(mathToolInfos()),
+		agent.WithSpawn(spawnFromSpec),
+	}
+	pOpts = appendSkillRuntimeOpts(req, reg, pOpts)
+	par := agent.New(nil, pOpts...)
+	runner.ApplyLarkFromConfig(par, req.APIKey, req.BaseURL, req.Model)
+	return par
+}
+
 func appendSkillRuntimeOpts(req *ChatRequest, reg *skill.SkillRegistry, opts []agent.Option) []agent.Option {
 	names := req.effectiveSkillNames(reg)
 	if reg != nil && len(names) > 0 {
@@ -414,6 +469,18 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 				runner.WithLogger(log.Default()),
 				runner.WithVarStore(vstore),
 				runner.WithSkillRegistry(reg),
+			)
+		case "spawn":
+			ropts := []runner.RunOption{
+				runner.WithLogger(log.Default()),
+				runner.WithVarStore(vstore),
+			}
+			if reg != nil {
+				ropts = append(ropts, runner.WithSkillRegistry(reg))
+			}
+			ag = runner.NewRunner(
+				buildSpawnAgent(&chatReq, reg),
+				ropts...,
 			)
 		default:
 			entry := buildSingleAgent(&chatReq, mcpProf, mcpSuffix, reg)
