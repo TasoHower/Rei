@@ -3,6 +3,7 @@ package exchange
 import (
 	"time"
 
+	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/tool"
 )
@@ -73,6 +74,9 @@ type SpawnSpec struct {
 	Lifecycle Lifecycle
 	// AllowChildSpawn 是否允许子运行再派生子运行
 	AllowChildSpawn bool
+	// OutputCh, when non-nil, receives child RuntimeEvent values forwarded to the parent
+	// event stream for real-time observability (e.g. tool calls, streaming text).
+	OutputCh chan<- *event.RuntimeEvent `json:"-"`
 }
 
 // LoopOverrides 对单个子运行循环的调参（覆盖默认配置）。
@@ -81,6 +85,18 @@ type LoopOverrides struct {
 	MaxSteps *int
 	// Timeout 非空时覆盖子运行总超时
 	Timeout *time.Duration
+}
+
+// ChildToolCall 记录子运行中一次工具调用的名称、参数和结果。
+type ChildToolCall struct {
+	// Name 工具名称
+	Name string `json:"name"`
+	// Arguments 调用工具时传入的 JSON 参数
+	Arguments string `json:"arguments"`
+	// Output 工具返回的 JSON 结果文本
+	Output string `json:"output,omitempty"`
+	// IsError 工具是否返回错误
+	IsError bool `json:"is_error"`
 }
 
 // SpawnResult 作为 spawn 工具的结果内容返回给父侧 agent。
@@ -95,6 +111,8 @@ type SpawnResult struct {
 	Error *SpawnError
 	// Metrics 子运行的运行指标（如 token 等，由 engine 填写）
 	Metrics outcome.RunMetrics
+	// ChildToolCalls 子运行过程中的工具调用记录列表（按调用顺序排列）
+	ChildToolCalls []ChildToolCall `json:"child_tool_calls,omitempty"`
 }
 
 // SpawnStatus 子运行结束时的状态。

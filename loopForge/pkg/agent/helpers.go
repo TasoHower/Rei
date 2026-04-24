@@ -75,9 +75,9 @@ func (a *Agent) bindModel(ctx context.Context, extraRuntimeTools ...*model.ToolI
 	return a.ChatModel, nil
 }
 
-// resolveSpawnMaxDepth returns the maximum allowed [exchange.RunRef.Depth] of a
+// ResolveSpawnMaxDepth returns the maximum allowed [exchange.RunRef.Depth] of a
 // *new* child (reject when parentDepth+1 >= this value, using defaults and request override).
-func resolveSpawnMaxDepth(req *request.RuntimeRequest) int {
+func ResolveSpawnMaxDepth(req *request.RuntimeRequest) int {
 	d := defaults.SpawnMaxDepthDefault
 	if req != nil && req.Options.SpawnMaxDepth != nil && *req.Options.SpawnMaxDepth > 0 {
 		d = *req.Options.SpawnMaxDepth

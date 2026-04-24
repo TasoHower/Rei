@@ -37,7 +37,13 @@ func consumeStream(
 	var toolCalls []model.ToolCallPart
 	var inputTok, outputTok int64
 
+	// Blind spot #2 fix: check ctx before each Recv() call
 	for {
+		select {
+		case <-ctx.Done():
+			return streamResult{Err: ctx.Err()}
+		default:
+		}
 		chunk, recvErr := stream.Recv()
 		if recvErr == io.EOF {
 			break

@@ -43,7 +43,27 @@ Follow skill text when it applies. Use built-in add/subtract/multiply/divide too
 Use var_set only when testing the variable store. If execute_shell_script or load_skill are listed, use them only as allowed by the skill and tool descriptions.`
 	defaultSpawnSystemPrompt = `You are the loopForge test assistant in spawn demo mode.
 
-**spawn_subagent** runs an isolated sub-agent (same four-function math tools) and returns JSON. Call it with: {"task": "<concrete subtask, e.g. a calculation>"}. Read the result and explain briefly to the user. Prefer spawn_subagent for self-contained arithmetic the user can treat as a separate step; for simple follow-ups in the same context you may answer without spawning.`
+**spawn_subagent** launches a sub-agent asynchronously. When you call it:
+  1. It returns IMMEDIATELY with {"status":"completed","child_ref":"...-async"} — you do NOT wait for the child.
+  2. The child runs independently, and its progress (tool calls, text output) appears as follow-up events to the user automatically.
+  3. You should reply to the user RIGHT AWAY after calling spawn_subagent, explaining that a subtask has been launched.
+  4. The child's final answer will also appear as its own event.
+
+Example:
+  User: "calculate 123 * 456 + 789"
+  You (call spawn_subagent with task "compute 123*456+789"):
+    → returns immediately
+  You (reply to user): "I've launched a subtask for that calculation, results will appear shortly."
+  [child events stream automatically with tool calls and final answer]
+
+Call with: {"task": "<concrete subtask>"}
+
+Optional parameters:
+  - "system_addendum": extra system instructions for the child
+  - "allow_child_spawn": if true, the child may also use spawn_subagent (default false)
+  - "max_steps": override max ReAct steps for the child (default 8)
+
+The child cannot see parent variables. Prefer spawn_subagent for self-contained arithmetic.`
 )
 
 // ChatRequest is the JSON body for POST /api/chat.
@@ -66,6 +86,12 @@ type ChatRequest struct {
 	SkillShell bool     `json:"skill_shell,omitempty"`
 	SkillLoad  bool     `json:"skill_load,omitempty"`
 	ShowSystem bool     `json:"show_system_prompt,omitempty"`
+
+	// SpawnConfig fields for spawn mode testing
+	SpawnMaxDepth   *int    `json:"spawn_max_depth,omitempty"`  // max spawn depth (default 2)
+	SpawnConcurrent int     `json:"spawn_concurrent,omitempty"` // max concurrent child runs (0 = default)
+	BudgetTokens    int64   `json:"budget_tokens,omitempty"`    // tree-wide token budget (0 = unlimited)
+	BudgetUSD       float64 `json:"budget_usd,omitempty"`       // tree-wide cost budget USD (0 = unlimited)
 }
 
 // SSEEvent is the JSON payload written as SSE data for each RuntimeEvent.
@@ -133,6 +159,13 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func derefInt(p *int, fallback int) int {
+	if p != nil {
+		return *p
+	}
+	return fallback
 }
 
 // --- session-scoped variables (in-memory; demonstrates Materialize + Snapshot) ---
@@ -290,6 +323,7 @@ func buildSingleAgent(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffi
 
 // buildSpawnAgent is the spawn demo entry: no MCP (built-in add/subtract/multiply/divide only);
 // parent may call spawn_subagent; child runs in a separate RunLoop.
+// Children default to AllowChildSpawn=true for nested spawn testing.
 func buildSpawnAgent(req *ChatRequest, reg *skill.SkillRegistry) *agent.Agent {
 	subSys := `You are a temporary sub-agent for a single subtask. Use only the built-in tools add, subtract, multiply, and divide for all numeric work. Keep the final reply to one or two short sentences.`
 	childOpts := []agent.Option{
@@ -310,12 +344,9 @@ func buildSpawnAgent(req *ChatRequest, reg *skill.SkillRegistry) *agent.Agent {
 	var spawnFromSpec func(*exchange.SpawnSpec) *agent.Agent
 	spawnFromSpec = func(spec *exchange.SpawnSpec) *agent.Agent {
 		c := childTmpl.Clone()
-		c.SpawnEnabled = spec.AllowChildSpawn
-		if spec.AllowChildSpawn {
-			c.ChildAgentBuilder = spawnFromSpec
-		} else {
-			c.ChildAgentBuilder = nil
-		}
+		// Enable nested spawn by default; the policy layer enforces max depth
+		c.SpawnEnabled = true
+		c.ChildAgentBuilder = spawnFromSpec
 		return c
 	}
 
@@ -474,9 +505,15 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 			ropts := []runner.RunOption{
 				runner.WithLogger(log.Default()),
 				runner.WithVarStore(vstore),
+				runner.WithSpawnConfig(derefInt(chatReq.SpawnMaxDepth, 2), chatReq.SpawnConcurrent),
+				runner.WithBudgetLimits(chatReq.BudgetTokens, chatReq.BudgetUSD),
 			}
 			if reg != nil {
 				ropts = append(ropts, runner.WithSkillRegistry(reg))
+			}
+			if chatReq.ShowSystem {
+				sysPrompt := chatReq.SystemPrompt
+				logger.Info("spawn mode system prompt", "system_prompt", sysPrompt)
 			}
 			ag = runner.NewRunner(
 				buildSpawnAgent(&chatReq, reg),

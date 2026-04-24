@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"loopforge/pkg/log"
+	"loopforge/pkg/model"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/runtime/outcome"
@@ -19,25 +22,30 @@ type Spawner interface {
 	Spawn(ctx context.Context, parent exchange.RunRef, spec *exchange.SpawnSpec) (*exchange.SpawnResult, error)
 }
 
-type defaultSpawner struct {
-	parent  *Agent
-	maxDepth int
+// DefaultSpawner wraps the parent Agent with spawn configuration.
+type DefaultSpawner struct {
+	Parent   *Agent
+	MaxDepth int
 }
 
-func newDefaultSpawner(parent *Agent, maxDepth int) *defaultSpawner {
-	return &defaultSpawner{parent: parent, maxDepth: maxDepth}
+// NewDefaultSpawner creates a Spawner that builds child agents from the parent's
+// ChildAgentBuilder and runs them in isolated goroutines.
+func NewDefaultSpawner(parent *Agent, maxDepth int) Spawner {
+	return &DefaultSpawner{Parent: parent, MaxDepth: maxDepth}
 }
 
 // Spawn runs the child [RunLoop] in a standalone goroutine; child [event.RuntimeEvent] are not
 // forwarded to the parent stream. The parent context is cancelled when the parent is cancelled.
-func (s *defaultSpawner) Spawn(ctx context.Context, parent exchange.RunRef, spec *exchange.SpawnSpec) (*exchange.SpawnResult, error) {
-	if s == nil || s.parent == nil {
+func (s *DefaultSpawner) Spawn(ctx context.Context, parent exchange.RunRef, spec *exchange.SpawnSpec) (*exchange.SpawnResult, error) {
+	if s == nil || s.Parent == nil {
 		return nil, fmt.Errorf("spawner: nil parent agent")
 	}
+
 	if spec == nil {
 		return nil, fmt.Errorf("spawner: nil spec")
 	}
-	if s.parent.ChildAgentBuilder == nil {
+
+	if s.Parent.ChildAgentBuilder == nil {
 		return nil, fmt.Errorf("spawner: ChildAgentBuilder is nil")
 	}
 	if spec.Lifecycle != "" && spec.Lifecycle != exchange.LifecycleEphemeral {
@@ -56,7 +64,7 @@ func (s *defaultSpawner) Spawn(ctx context.Context, parent exchange.RunRef, spec
 			Error:       &exchange.SpawnError{Code: "unsupported_lifecycle", Message: string(spec.Lifecycle)},
 		}, nil
 	}
-	if parent.Depth+1 >= s.maxDepth {
+	if parent.Depth+1 >= s.MaxDepth {
 		return &exchange.SpawnResult{
 			ChildRunRef: childRunRefPlanned(&parent, "-rejected"),
 			Status:      exchange.SpawnRejected,
@@ -64,12 +72,17 @@ func (s *defaultSpawner) Spawn(ctx context.Context, parent exchange.RunRef, spec
 			Error:       &exchange.SpawnError{Code: "max_depth", Message: "spawn would exceed max depth"},
 		}, nil
 	}
-	childTmpl := s.parent.ChildAgentBuilder(spec)
+	childTmpl := s.Parent.ChildAgentBuilder(spec)
 	if childTmpl == nil {
 		return nil, fmt.Errorf("spawner: ChildAgentBuilder returned nil")
 	}
 	childTmpl = childTmpl.Clone()
 	childTmpl = applySpecToChildAgent(childTmpl, spec)
+
+	// Force non-streaming on child ChatModel (§6)
+	if childTmpl.ChatModel != nil {
+		childTmpl.ChatModel = model.WrapNonStream(childTmpl.ChatModel)
+	}
 
 	runID := fmt.Sprintf("%s-spawn-%d", parent.RunID, time.Now().UnixNano())
 	childRef := exchange.RunRef{
@@ -96,31 +109,82 @@ func (s *defaultSpawner) Spawn(ctx context.Context, parent exchange.RunRef, spec
 	ch := make(chan *event.RuntimeEvent, 256)
 	var last *outcome.RuntimeOutcome
 
+	// Capture child tool calls in order for inclusion in SpawnResult
+	type pendingToolCall struct {
+		name      string
+		arguments string
+	}
+	pendingTC := make(map[string]pendingToolCall) // tool_call_id → pending
+	var childToolCalls []exchange.ChildToolCall
+	var tcMu sync.Mutex
+
+	// Derive a child context so we can cancel independently
+	childCtx, childCancel := context.WithCancel(ctx)
+	defer childCancel()
+
 	go func() {
 		defer close(ch)
 		if childTmpl == nil {
 			return
 		}
-		childTmpl.RunLoop(ctx, sub, ch, nil, st)
+		childTmpl.RunLoop(childCtx, sub, ch, nil, st)
 	}()
 
-	for ev := range ch {
-		if ev == nil {
-			continue
-		}
-		if qe := ev.QueryEnd(); qe != nil {
-			if qe.Outcome != nil {
-				last = qe.Outcome
+	// Blind spot #1 fix: ctx-aware event loop instead of bare for-range
+eventLoop:
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				break eventLoop
 			}
+
+			if qe := ev.QueryEnd(); qe != nil {
+				if qe.Outcome != nil {
+					last = qe.Outcome
+				}
+				// Don't forward QueryEnd since we're about to produce our own
+				// SpawnResult-based reply. The parent SSE handler would see a
+				// duplicate termination signal.
+				continue
+			}
+			if cs := ev.ToolCallStart(); cs != nil {
+				tcMu.Lock()
+				pendingTC[cs.ToolCallID] = pendingToolCall{name: cs.Name, arguments: cs.Arguments}
+				tcMu.Unlock()
+			}
+			if ce := ev.ToolCallEnd(); ce != nil {
+				tcMu.Lock()
+				p := pendingTC[ce.ToolCallID]
+				delete(pendingTC, ce.ToolCallID)
+				tcMu.Unlock()
+				childToolCalls = append(childToolCalls, exchange.ChildToolCall{
+					Name:      p.name,
+					Arguments: p.arguments,
+					Output:    ce.Output,
+					IsError:   ce.IsError,
+				})
+			}
+		case <-childCtx.Done():
+			// Parent cancelled or timed out; don't wait for ch close
+			log.Default().Debug("spawn event loop exiting on ctx cancellation",
+				"child_run_id", childRef.RunID,
+				"parent_run_id", parent.RunID,
+			)
+			break eventLoop
 		}
 	}
 
 	if last == nil {
+		code := "no_outcome"
+		if childCtx.Err() != nil {
+			code = "parent_cancelled"
+		}
 		return &exchange.SpawnResult{
 			ChildRunRef: childRef,
 			Status:      exchange.SpawnFailed,
 			FinalText:   "",
-			Error:       &exchange.SpawnError{Code: "no_outcome", Message: "child run produced no terminal outcome"},
+			Error:       &exchange.SpawnError{Code: code, Message: "child run terminated early"},
 		}, nil
 	}
 	stS := exchange.SpawnCompleted
@@ -128,10 +192,11 @@ func (s *defaultSpawner) Spawn(ctx context.Context, parent exchange.RunRef, spec
 		stS = exchange.SpawnFailed
 	}
 	res := &exchange.SpawnResult{
-		ChildRunRef: childRef,
-		Status:      stS,
-		FinalText:   last.FinalText,
-		Metrics:     last.Metrics,
+		ChildRunRef:    childRef,
+		Status:         stS,
+		FinalText:      last.FinalText,
+		Metrics:        last.Metrics,
+		ChildToolCalls: childToolCalls,
 	}
 	if stS == exchange.SpawnFailed {
 		res.Error = &exchange.SpawnError{Code: string(last.Termination), Message: "child run terminated: " + string(last.Termination)}

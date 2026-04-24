@@ -113,7 +113,7 @@ func (a *Agent) RunLoop(
 	if state != nil && state.CurrentRunRef != nil {
 		effectiveRef = state.CurrentRunRef
 	}
-	if t := buildSpawnSubagentVarTool(effectiveRef, a, req, state); t != nil {
+	if t := buildSpawnSubagentVarTool(effectiveRef, a, req, state, ch); t != nil {
 		varTools = append(varTools, t)
 	}
 
@@ -160,6 +160,13 @@ func (a *Agent) RunLoop(
 
 	var lastText string
 	for step := range maxSteps {
+		// Backstop: check ctx cancellation at the top of each step
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
 		if freshSession {
 			userStep := ReplaceDoubleBraceParams(userTemplate, stringParamsFromVarStore(vstore))
 			msgs = replaceFirstUserMessage(msgs, userStep)
@@ -213,6 +220,9 @@ func (a *Agent) RunLoop(
 		})
 
 		if len(sr.ToolCalls) == 0 {
+			if state != nil {
+				state.WaitAsyncSpawns(ctx)
+			}
 			pendingQueryEnd = buildOutcome(lastText, outcome.TerminationCompleted, step+1)
 			pendingQueryEndStep = step
 			return nil
@@ -232,6 +242,9 @@ func (a *Agent) RunLoop(
 		msgs = append(msgs, toolMsgs...)
 	}
 
+	if state != nil {
+		state.WaitAsyncSpawns(ctx)
+	}
 	pendingQueryEnd = buildOutcome(lastText, outcome.TerminationMaxSteps, maxSteps)
 	pendingQueryEndStep = 0
 	if maxSteps > 0 {

@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"sync"
 
+	"loopforge/internal/defaults"
+	"loopforge/internal/engine"
 	"loopforge/pkg/agent"
 	"loopforge/pkg/log"
 	"loopforge/pkg/model"
+	"loopforge/pkg/runtime/budget"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/runtime/outcome"
@@ -35,6 +38,12 @@ type Runner struct {
 	pathRegMu     sync.Mutex
 	pathLoadedReg *skill.SkillRegistry
 	pathLoadErr   error
+
+	// spawnConfig overrides the default RunState and LoopPolicy for spawn tests.
+	spawnMaxDepth       *int    // nil = use req.Options.SpawnMaxDepth
+	maxConcurrentSpawns int     // 0 = default
+	budgetTokens        int64   // 0 = default (unlimited)
+	budgetUSD           float64 // 0 = default (unlimited)
 }
 
 var _ agent.Runnable = (*Runner)(nil)
@@ -90,6 +99,33 @@ func WithVarStore(s *variable.VarStore) RunOption {
 	}
 }
 
+// WithSpawnConfig sets spawn limits for this run.
+// maxDepth overrides req.Options.SpawnMaxDepth; zero means use request default.
+// maxConcurrentSpawns limits how many child runs can be active at once; zero means unlimited.
+func WithSpawnConfig(maxDepth, maxConcurrentSpawns int) RunOption {
+	return func(r *Runner) {
+		if maxDepth > 0 {
+			r.spawnMaxDepth = &maxDepth
+		}
+		if maxConcurrentSpawns > 0 {
+			r.maxConcurrentSpawns = maxConcurrentSpawns
+		}
+	}
+}
+
+// WithBudgetLimits sets tree-wide token/cost budget for the entire run tree.
+// Zero means unlimited for that dimension.
+func WithBudgetLimits(maxTokens int64, maxUSD float64) RunOption {
+	return func(r *Runner) {
+		if maxTokens > 0 {
+			r.budgetTokens = maxTokens
+		}
+		if maxUSD > 0 {
+			r.budgetUSD = maxUSD
+		}
+	}
+}
+
 // Run starts the agent graph in a goroutine and returns a channel that streams
 // RuntimeEvents. If the entry agent has handoff targets, the runner
 // automatically manages the transfer loop; otherwise it runs the single agent.
@@ -100,17 +136,55 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 
 	go func() {
 		defer close(ch)
+		runID := runIDFrom(req)
+
+		// Resolve spawn depth from runner config (if set) or request default
+		if r.spawnMaxDepth != nil {
+			if req.Options.SpawnMaxDepth == nil || *req.Options.SpawnMaxDepth <= 0 {
+				req.Options.SpawnMaxDepth = r.spawnMaxDepth
+			}
+		}
+
+		// Resolve budget limits from runner config or defaults
+		tokensMax := r.budgetTokens
+		if tokensMax <= 0 {
+			tokensMax = defaults.SpawnBudgetTokenTreeDefault
+		}
+		usdMax := r.budgetUSD
+		if usdMax <= 0 {
+			usdMax = defaults.SpawnBudgetUSDTreeDefault
+		}
+
+		// Create tree-wide RunState with spawn tracking and budget
+		maxConcurrent := r.maxConcurrentSpawns
+		if maxConcurrent <= 0 {
+			maxConcurrent = defaults.MaxConcurrentSpawnsDefault
+		}
+		bc := budget.NewBudgetCounter(tokensMax, usdMax)
+		policy := engine.NewCustomLoopPolicy(
+			defaults.MaxStepsDefault,
+			defaults.SpawnMaxDepthDefault,
+			maxConcurrent,
+			bc,
+		)
+		runState := &engine.RunState{
+			RunID:         runID,
+			Depth:         0,
+			AllowSpawn:    true,
+			Children:      engine.NewChildRegistry(),
+			BudgetCounter: policy.BudgetCounter(),
+		}
+
 		if len(r.entryAgent.Handoffs()) > 0 {
 			r.logger.Debug("run started in transfer mode",
 				"entry_agent", r.entryAgent.Name,
 				"handoffs", len(r.entryAgent.Handoffs()),
 			)
-			r.runTransferLoop(ctx, req, ch)
+			r.runTransferLoop(ctx, req, ch, runState, policy)
 		} else {
 			r.logger.Debug("run started in single-agent mode",
 				"agent", r.entryAgent.Name,
 			)
-			runID := runIDFrom(req)
 			store := r.varStore
 			if store == nil {
 				store = variable.New()
@@ -125,14 +199,23 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 				emitRunSetupError(ctx, ch, runID, err.Error())
 				return
 			}
+
+			// Inject engine-level spawner for ChildRegistry + budget tracking
+			maxD := agent.ResolveSpawnMaxDepth(req)
+			inner := agent.NewDefaultSpawner(exec, maxD)
+			exec.Spawner = engine.NewEngineSpawner(inner, runState)
+
 			exec.RunLoop(ctx, req, ch, nil, st)
+
+			// Cascade cleanup: cancel any lingering children after parent completes
+			runState.Terminate(outcome.TerminationCompleted)
 		}
 	}()
 
 	return ch
 }
 
-func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeRequest, ch chan<- *event.RuntimeEvent) {
+func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeRequest, ch chan<- *event.RuntimeEvent, runState *engine.RunState, _ engine.LoopPolicy) {
 	runID := runIDFrom(req)
 
 	emit := func(step int, payload event.EventPayload) {
@@ -207,7 +290,15 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 			"transfer_count", transferCount,
 		)
 
+		// Inject engine-level spawner for this agent hop
+		maxD := agent.ResolveSpawnMaxDepth(req)
+		inner := agent.NewDefaultSpawner(a, maxD)
+		a.Spawner = engine.NewEngineSpawner(inner, runState)
+
 		result := a.RunLoop(ctx, req, ch, inheritedMsgs, st)
+
+		// Cascade cleanup after each agent hop
+		runState.Terminate(outcome.TerminationCompleted)
 
 		if result == nil {
 			r.logger.Info("transfer loop completed",

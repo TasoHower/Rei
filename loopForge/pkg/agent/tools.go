@@ -23,6 +23,13 @@ func executeToolCalls(
 	results := make([]*model.Message, 0, len(toolCalls))
 
 	for i := range toolCalls {
+		// Blind spot #3 fix: check ctx before executing each tool
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		tc := toolCalls[i]
 		log.Default().Info("tool call emit start",
 			"step", step,

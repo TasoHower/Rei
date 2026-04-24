@@ -5,19 +5,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bytedance/sonic"
 	modeliface "loopforge/pkg/model/interface"
 	"loopforge/pkg/model/types"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
+
+	"github.com/bytedance/sonic"
 )
 
 // seqSpawnThenFinalChatModel returns a spawn tool call on the first [Generate] round, then final text.
 type seqSpawnThenFinalChatModel struct {
-	step   int
-	final  string
+	step  int
+	final string
 }
 
 func (m *seqSpawnThenFinalChatModel) Stream(ctx context.Context, input []*types.Message, opts ...types.CallOption) (types.MessageStreamReader, error) {
@@ -59,7 +60,7 @@ func TestDefaultSpawner_RejectAtMaxDepth(t *testing.T) {
 		ChildAgentBuilder: func(*exchange.SpawnSpec) *Agent { return built },
 		ChatModel:         ch,
 	}
-	sp := newDefaultSpawner(par, 2)
+	sp := NewDefaultSpawner(par, 2)
 	res, err := sp.Spawn(context.Background(), exchange.RunRef{RunID: "p", Depth: 1},
 		&exchange.SpawnSpec{Task: "t", Lifecycle: exchange.LifecycleEphemeral})
 	if err != nil {
@@ -81,7 +82,7 @@ func TestDefaultSpawner_ChildRunCompletes(t *testing.T) {
 		ChildAgentBuilder: func(*exchange.SpawnSpec) *Agent { return child.Clone() },
 		ChatModel:         newFinalTestModel("unused"),
 	}
-	sp := newDefaultSpawner(par, 2)
+	sp := NewDefaultSpawner(par, 2)
 	res, err := sp.Spawn(context.Background(), exchange.RunRef{RunID: "root", Depth: 0},
 		&exchange.SpawnSpec{Task: "do sub", Lifecycle: exchange.LifecycleEphemeral})
 	if err != nil {
@@ -112,7 +113,9 @@ func (m *mockTextOnlyModel) Stream(ctx context.Context, input []*types.Message, 
 func (m *mockTextOnlyModel) Generate(_ context.Context, _ []*types.Message, _ ...types.CallOption) (*types.Message, error) {
 	return &types.Message{Role: types.RoleAssistant, Content: m.text}, nil
 }
-func (m *mockTextOnlyModel) WithTools(_ []*types.ToolInfo) (modeliface.ToolCallingChatModel, error) { return m, nil }
+func (m *mockTextOnlyModel) WithTools(_ []*types.ToolInfo) (modeliface.ToolCallingChatModel, error) {
+	return m, nil
+}
 
 var _ modeliface.ToolCallingChatModel = (*mockTextOnlyModel)(nil)
 
@@ -121,7 +124,7 @@ func TestBuildSpawnSubagent_NilWhenDisabled(t *testing.T) {
 	ref := &exchange.RunRef{RunID: "a", Depth: 0}
 	req := &request.RuntimeRequest{}
 	agent := &Agent{SpawnEnabled: false, ChildAgentBuilder: func(*exchange.SpawnSpec) *Agent { return &Agent{} }}
-	if x := buildSpawnSubagentVarTool(ref, agent, req, nil); x != nil {
+	if x := buildSpawnSubagentVarTool(ref, agent, req, nil, nil); x != nil {
 		t.Fatalf("expected nil, got %v", x)
 	}
 }
@@ -136,7 +139,7 @@ func TestBuildSpawnSubagent_NilAtDepth(t *testing.T) {
 		ChatModel:         newFinalTestModel("a"),
 	}
 	// default max depth 2: parent 1 + child would be 2, not < 2
-	if x := buildSpawnSubagentVarTool(ref, par, req, nil); x != nil {
+	if x := buildSpawnSubagentVarTool(ref, par, req, nil, nil); x != nil {
 		t.Fatalf("expected nil, got %v", x)
 	}
 }
@@ -150,7 +153,7 @@ func TestBuildSpawnSubagent_IncludeWhenAllowed(t *testing.T) {
 		ChildAgentBuilder: func(*exchange.SpawnSpec) *Agent { return &Agent{ChatModel: newFinalTestModel("x")} },
 		ChatModel:         newFinalTestModel("a"),
 	}
-	if x := buildSpawnSubagentVarTool(ref, par, req, nil); x == nil {
+	if x := buildSpawnSubagentVarTool(ref, par, req, nil, nil); x == nil {
 		t.Fatal("expected non-nil")
 	} else if x.Name != "spawn_subagent" {
 		t.Fatalf("name %q", x.Name)
@@ -210,7 +213,7 @@ func TestRunLoop_SpawnPath_RollupChildMetricsIntoParentOutcome(t *testing.T) {
 	}
 }
 
-func TestRunLoop_SpawnPath_NoChildLLMEventsOnParentCh(t *testing.T) {
+func TestRunLoop_SpawnPath_ChildEventsForwardedToParentCh(t *testing.T) {
 	t.Parallel()
 	var childTmpl = &Agent{
 		Name:      "child",
@@ -239,19 +242,27 @@ func TestRunLoop_SpawnPath_NoChildLLMEventsOnParentCh(t *testing.T) {
 	_ = par.RunLoop(ctx, &request.RuntimeRequest{UserMessage: "u", SessionID: "r"}, ch, nil, st)
 	close(ch)
 	events := collectEventChannel(ch)
+	// In async mode, intermediate child LLM events are NOT forwarded through
+	// the parent channel. Only parent events appear (2 rounds) + the final
+	// child answer delivered by the async goroutine.
 	var callLLM int
 	for _, ev := range events {
 		if ev.CallLLMStart() != nil {
 			callLLM++
 		}
 	}
-	// parent: 2 model rounds; child runs in spawner, so parent ch should not show 3+ from child (only 2 for parent)
-	if callLLM < 2 {
-		t.Fatalf("parent call_llm count: %d", callLLM)
+	if callLLM != 2 {
+		t.Fatalf("expected 2 parent call_llm events, got %d", callLLM)
 	}
-	// 3 would indicate child leaking into the same ch (defensive: expect 2, not 3+)
-	if callLLM > 2 {
-		t.Fatalf("child likely leaked: call_llm=%d", callLLM)
+	// Verify the child's final answer is forwarded as a single event
+	var childAnswers int
+	for _, ev := range events {
+		if a := ev.Answer(); a != nil && strings.Contains(a.Delta, "child") {
+			childAnswers++
+		}
+	}
+	if childAnswers == 0 {
+		t.Fatal("expected child final answer delivered to parent channel")
 	}
 }
 

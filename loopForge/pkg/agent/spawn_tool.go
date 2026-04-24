@@ -8,13 +8,27 @@ import (
 
 	"loopforge/internal/defaults"
 	"loopforge/pkg/model"
+	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/exchange"
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 )
 
+func tryEmitRuntimeEvent(eventCh chan<- *event.RuntimeEvent, ev *event.RuntimeEvent) {
+	if eventCh == nil || ev == nil {
+		return
+	}
+	defer func() {
+		_ = recover()
+	}()
+	select {
+	case eventCh <- ev:
+	default:
+	}
+}
+
 type spawnSubagentArgs struct {
-	Task            string `json:"task"`
+	Task            string   `json:"task"`
 	SystemAddendum  string   `json:"system_addendum"`
 	SkillIDs        []string `json:"skill_ids"`
 	Model           string   `json:"model"`
@@ -39,20 +53,22 @@ func addChildRunMetricsToLoopState(st *LoopState, child outcome.RunMetrics) {
 
 // buildSpawnSubagentVarTool returns a runtime [model.ToolInfo] for the spawn builtin, or nil
 // when the agent is not configured for spawn or depth disallows another child.
-func buildSpawnSubagentVarTool(parent *exchange.RunRef, parentTemplate *Agent, req *request.RuntimeRequest, loop *LoopState) *model.ToolInfo {
+// eventCh, when non-nil, switches the spawn handler to async mode: the handler returns
+// immediately with a "started" result while child events are forwarded to eventCh.
+func buildSpawnSubagentVarTool(parent *exchange.RunRef, parentTemplate *Agent, req *request.RuntimeRequest, loop *LoopState, eventCh chan<- *event.RuntimeEvent) *model.ToolInfo {
 	if parentTemplate == nil || parent == nil {
 		return nil
 	}
 	if !parentTemplate.SpawnEnabled || parentTemplate.ChildAgentBuilder == nil {
 		return nil
 	}
-	maxD := resolveSpawnMaxDepth(req)
+	maxD := ResolveSpawnMaxDepth(req)
 	if parent.Depth+1 >= maxD {
 		return nil
 	}
 	sp := parentTemplate.Spawner
 	if sp == nil {
-		sp = newDefaultSpawner(parentTemplate, maxD)
+		sp = NewDefaultSpawner(parentTemplate, maxD)
 	}
 	name := defaults.BuiltinSpawnToolName
 	return &model.ToolInfo{
@@ -91,7 +107,7 @@ func buildSpawnSubagentVarTool(parent *exchange.RunRef, parentTemplate *Agent, r
 			},
 			"required": []string{"task"},
 		},
-		Handle: makeSpawnHandler(parent, sp, maxD, loop),
+		Handle: makeSpawnHandler(parent, sp, maxD, loop, eventCh),
 	}
 }
 
@@ -100,6 +116,7 @@ func makeSpawnHandler(
 	sp Spawner,
 	maxD int,
 	loop *LoopState,
+	eventCh chan<- *event.RuntimeEvent,
 ) model.ToolCallHandler {
 	return func(ctx context.Context, argumentsJSON string) (string, error) {
 		var a spawnSubagentArgs
@@ -137,11 +154,47 @@ func makeSpawnHandler(
 			}
 			return res, nil
 		}
+
+		if eventCh != nil {
+			// Async mode: return immediately so the parent LLM can reply to
+			// the user right away, while the child runs in the background.
+			// We do NOT forward intermediate child events through the parent
+			// channel (which would cause ordering race with parent events);
+			// instead the goroutine sends a single completion event on behalf
+			// of the child when it finishes.
+			if loop != nil {
+				loop.AddAsyncSpawn()
+			}
+			go func() {
+				if loop != nil {
+					defer loop.DoneAsyncSpawn()
+				}
+				res, err := sp.Spawn(ctx, derefRef(parent), spec)
+				if err != nil {
+					return
+				}
+				if res != nil {
+					addChildRunMetricsToLoopState(loop, res.Metrics)
+					// Deliver the child's final answer as a single event on the
+					// parent SSE stream (non-blocking send in case the channel
+					// is already closed).
+					if res.FinalText != "" {
+						tryEmitRuntimeEvent(eventCh, event.Emit(res.ChildRunRef.RunID, 0, &event.AnswerPayload{Delta: res.FinalText}))
+					}
+				}
+			}()
+			return sonic.MarshalString(&exchange.SpawnResult{
+				ChildRunRef: childRunRefPlanned(parent, "-async"),
+				Status:      exchange.SpawnCompleted,
+				FinalText:   "",
+			})
+		}
+
+		// Sync mode (no eventCh): block until child completes
 		res, err := sp.Spawn(ctx, derefRef(parent), spec)
 		if err != nil {
 			return "", err
 		}
-		// Count child run (and any nested spawns in its LoopState) toward parent metrics.
 		if res != nil {
 			addChildRunMetricsToLoopState(loop, res.Metrics)
 		}

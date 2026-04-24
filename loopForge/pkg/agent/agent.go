@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"loopforge/pkg/mcp/cfg"
@@ -42,6 +43,40 @@ type LoopState struct {
 	ExtraSkills []skill.SkillSpec
 	// CurrentRunRef, when set by the Runner, identifies this loop for spawn depth and RunID.
 	CurrentRunRef *exchange.RunRef
+	// asyncWG tracks background spawn tasks that should finish before QueryEnd.
+	asyncWG sync.WaitGroup
+}
+
+// AddAsyncSpawn increments the async child task counter.
+func (s *LoopState) AddAsyncSpawn() {
+	if s == nil {
+		return
+	}
+	s.asyncWG.Add(1)
+}
+
+// DoneAsyncSpawn decrements the async child task counter.
+func (s *LoopState) DoneAsyncSpawn() {
+	if s == nil {
+		return
+	}
+	s.asyncWG.Done()
+}
+
+// WaitAsyncSpawns blocks until all async child tasks complete or ctx is canceled.
+func (s *LoopState) WaitAsyncSpawns(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.asyncWG.Wait()
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // Agent is a concrete Runnable that drives a tool-calling loop using pkg/model.
