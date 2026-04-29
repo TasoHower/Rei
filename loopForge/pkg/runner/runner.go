@@ -357,12 +357,7 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 			Reason:    reason,
 		})
 
-		inheritedMsgs = append(result.Msgs, &model.Message{
-			Role:       model.RoleTool,
-			ToolCallID: result.ToolCall.ID,
-			Name:       result.ToolCall.Name,
-			Content:    fmt.Sprintf("Transfer accepted. The conversation is now handled by %s.", target),
-		})
+		inheritedMsgs = appendSyntheticToolResponsesAfterTransfer(result.Msgs, &result.ToolCall, target)
 		current = next
 		firstAgent = false
 	}
@@ -375,6 +370,65 @@ func findHandoff(a *agent.Agent, name string) *agent.Agent {
 		}
 	}
 	return nil
+}
+
+// appendSyntheticToolResponsesAfterTransfer appends one role=tool message per
+// entry in the last assistant message's ToolCalls. Downstream chat APIs
+// (OpenAI-compatible, including DeepSeek) reject histories where an assistant
+// message lists tool_calls but the following tool messages do not cover every
+// tool_call_id. Transfer intercepts before normal tool execution, so we must
+// still emit a synthetic result for each parallel tool call in that turn.
+func appendSyntheticToolResponsesAfterTransfer(
+	msgs []*model.Message,
+	intercepted *model.ToolCallPart,
+	targetAgent string,
+) []*model.Message {
+	if intercepted == nil {
+		return msgs
+	}
+	handoff := fmt.Sprintf("Transfer accepted. The conversation is now handled by %s.", targetAgent)
+	placeholder := `{"cancelled":true,"reason":"superseded by agent transfer"}`
+
+	lastIdx := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i] != nil && msgs[i].Role == model.RoleAssistant && len(msgs[i].ToolCalls) > 0 {
+			lastIdx = i
+			break
+		}
+	}
+	if lastIdx < 0 {
+		return append(msgs, &model.Message{
+			Role:       model.RoleTool,
+			ToolCallID: intercepted.ID,
+			Name:       intercepted.Name,
+			Content:    handoff,
+		})
+	}
+
+	out := msgs
+	for _, tc := range msgs[lastIdx].ToolCalls {
+		content := placeholder
+		if toolCallPartsMatch(&tc, intercepted) {
+			content = handoff
+		}
+		out = append(out, &model.Message{
+			Role:       model.RoleTool,
+			ToolCallID: tc.ID,
+			Name:       tc.Name,
+			Content:    content,
+		})
+	}
+	return out
+}
+
+func toolCallPartsMatch(a, b *model.ToolCallPart) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.ID != "" && b.ID != "" {
+		return a.ID == b.ID
+	}
+	return a.Name == b.Name && a.Arguments == b.Arguments
 }
 
 func runIDFrom(req *request.RuntimeRequest) string {

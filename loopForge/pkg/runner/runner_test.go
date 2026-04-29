@@ -14,6 +14,37 @@ import (
 	"loopforge/pkg/runtime/request"
 )
 
+func TestRunner_Transfer_ParallelToolCalls_AllSyntheticToolMessages(t *testing.T) {
+	triage := agent.New(
+		mockParallelToolTransferChatModel{target: "expert"},
+		agent.WithName("triage"),
+		agent.WithSystemInstructions("You are triage."),
+	)
+	expert := agent.New(
+		mockFinalChatModel{text: "done with parallel tools."},
+		agent.WithName("expert"),
+		agent.WithSystemInstructions("You are an expert."),
+	)
+	triage.AddHandoff(expert)
+
+	r := NewRunner(triage, WithMaxTransfers(5))
+	ch := r.Run(context.Background(), &request.RuntimeRequest{
+		SessionID:   "test-parallel-tc",
+		UserMessage: "math",
+	})
+	events := collectEvents(ch)
+	qe := findQueryEnd(events)
+	if qe == nil || qe.Outcome == nil {
+		t.Fatal("missing QueryEndPayload")
+	}
+	if qe.Outcome.Termination != outcome.TerminationCompleted {
+		t.Fatalf("termination=%q", qe.Outcome.Termination)
+	}
+	if qe.Outcome.FinalText != "done with parallel tools." {
+		t.Fatalf("FinalText=%q", qe.Outcome.FinalText)
+	}
+}
+
 func TestRunner_Transfer_HappyPath(t *testing.T) {
 	triage := agent.New(
 		mockTransferChatModel{target: "expert"},

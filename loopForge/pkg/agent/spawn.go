@@ -139,13 +139,49 @@ eventLoop:
 				break eventLoop
 			}
 
+			// 将子 Agent 启动事件转发到父事件流（可观测性增强，不破坏上下文隔离）
+			if se := ev.Start(); se != nil && spec.OutputCh != nil {
+				select {
+				case spec.OutputCh <- &event.RuntimeEvent{
+					Type:  event.EventAgentTransfer,
+					RunID: parent.RunID,
+					Step:  0,
+					Payload: &event.AgentTransferPayload{
+						Phase:      event.TransferStart,
+						FromAgent:  parent.AgentRole,
+						ToAgent:    childTmpl.Name,
+						ChildRunID: childRef.RunID,
+						Depth:      childRef.Depth,
+					},
+				}:
+				default:
+				}
+			}
+
 			if qe := ev.QueryEnd(); qe != nil {
 				if qe.Outcome != nil {
 					last = qe.Outcome
 				}
-				// Don't forward QueryEnd since we're about to produce our own
-				// SpawnResult-based reply. The parent SSE handler would see a
-				// duplicate termination signal.
+				// 将子 Agent 结束事件转发到父事件流
+				if spec.OutputCh != nil {
+					childOK := last != nil && last.Termination == outcome.TerminationCompleted
+					select {
+					case spec.OutputCh <- &event.RuntimeEvent{
+						Type:  event.EventAgentTransfer,
+						RunID: parent.RunID,
+						Step:  0,
+						Payload: &event.AgentTransferPayload{
+							Phase:      event.TransferEnd,
+							FromAgent:  parent.AgentRole,
+							ToAgent:    childTmpl.Name,
+							ChildRunID: childRef.RunID,
+							Depth:      childRef.Depth,
+							OK:         childOK,
+						},
+					}:
+					default:
+					}
+				}
 				continue
 			}
 			if cs := ev.ToolCallStart(); cs != nil {
@@ -166,12 +202,31 @@ eventLoop:
 				})
 			}
 		case <-childCtx.Done():
-			// Parent cancelled or timed out; don't wait for ch close
 			log.Default().Debug("spawn event loop exiting on ctx cancellation",
 				"child_run_id", childRef.RunID,
 				"parent_run_id", parent.RunID,
 			)
 			break eventLoop
+		}
+	}
+
+	// 父级取消导致子 Agent 未正常结束：发送失败 end 事件
+	if last == nil && spec.OutputCh != nil {
+		select {
+		case spec.OutputCh <- &event.RuntimeEvent{
+			Type:  event.EventAgentTransfer,
+			RunID: parent.RunID,
+			Step:  0,
+			Payload: &event.AgentTransferPayload{
+				Phase:      event.TransferEnd,
+				FromAgent:  parent.AgentRole,
+				ToAgent:    childTmpl.Name,
+				ChildRunID: childRef.RunID,
+				Depth:      childRef.Depth,
+				OK:         false,
+			},
+		}:
+		default:
 		}
 	}
 

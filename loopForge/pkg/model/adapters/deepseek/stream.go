@@ -1,6 +1,7 @@
 package deepseek
 
 import (
+	"fmt"
 	"io"
 	"strings"
 
@@ -76,7 +77,7 @@ func (a *toolCallAccumulator) toToolCalls() []lpmodel.ToolCallPart {
 		return nil
 	}
 	out := make([]lpmodel.ToolCallPart, 0, len(a.order))
-	for _, idx := range a.order {
+	for ord, idx := range a.order {
 		p := a.byIndex[idx]
 		if p == nil {
 			continue
@@ -85,8 +86,12 @@ func (a *toolCallAccumulator) toToolCalls() []lpmodel.ToolCallPart {
 		if args == "" {
 			args = "{}"
 		}
+		id := strings.TrimSpace(p.id)
+		if id == "" {
+			id = fmt.Sprintf("stream_tool_%d", ord)
+		}
 		out = append(out, lpmodel.ToolCallPart{
-			ID:        p.id,
+			ID:        id,
 			Name:      p.name.String(),
 			Arguments: args,
 		})

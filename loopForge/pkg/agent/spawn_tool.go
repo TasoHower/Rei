@@ -123,6 +123,7 @@ func makeSpawnHandler(
 			SkillIDs:        a.SkillIDs,
 			ModelOverride:   a.Model,
 			AllowChildSpawn: a.AllowChildSpawn,
+			OutputCh:        eventCh,
 		}
 		if a.MaxSteps != nil && *a.MaxSteps > 0 {
 			spec.LoopOverrides = exchange.LoopOverrides{MaxSteps: a.MaxSteps}

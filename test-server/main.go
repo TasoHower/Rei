@@ -417,6 +417,7 @@ Optional: var_set session_note only if the user explicitly asks to store a prefe
 		agent.WithSystemInstructions(mathSys),
 		agent.WithCallOptions(model.WithTemperature(0.1)),
 		agent.WithVariable(),
+		agent.WithToolInfos(mathToolInfos()),
 	}
 	if len(mcpProf) > 0 {
 		mathOpts = append(mathOpts, agent.WithMCPServerProfiles(mcpProf...))

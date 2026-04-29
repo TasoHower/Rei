@@ -41,6 +41,45 @@ func (m mockTransferChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCall
 
 var _ modeliface.ToolCallingChatModel = mockTransferChatModel{}
 
+// mockParallelToolTransferChatModel returns a transfer tool call plus a second
+// non-transfer tool in the same assistant turn (parallel tool_calls).
+type mockParallelToolTransferChatModel struct {
+	target string
+}
+
+func (m mockParallelToolTransferChatModel) Stream(ctx context.Context, input []*types.Message, opts ...types.CallOption) (types.MessageStreamReader, error) {
+	msg, err := m.Generate(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return types.NewSliceStreamReader([]*types.Message{msg}), nil
+}
+
+func (m mockParallelToolTransferChatModel) Generate(_ context.Context, _ []*types.Message, _ ...types.CallOption) (*types.Message, error) {
+	return &types.Message{
+		Role:    types.RoleAssistant,
+		Content: "",
+		ToolCalls: []types.ToolCallPart{
+			{
+				ID:        "tc_transfer",
+				Name:      agent.TransferToolPrefix + m.target,
+				Arguments: `{"reason":"delegate math"}`,
+			},
+			{
+				ID:        "tc_other",
+				Name:      "other_tool",
+				Arguments: `{}`,
+			},
+		},
+	}, nil
+}
+
+func (m mockParallelToolTransferChatModel) WithTools([]*types.ToolInfo) (modeliface.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+var _ modeliface.ToolCallingChatModel = mockParallelToolTransferChatModel{}
+
 // mockFinalChatModel always returns a plain text response (no tool calls).
 type mockFinalChatModel struct {
 	text string
