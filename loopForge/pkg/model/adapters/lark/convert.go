@@ -50,10 +50,16 @@ func oneArkMessage(m *lpmodel.Message) (*arkmodel.ChatCompletionMessage, error) 
 			Role:    arkmodel.ChatMessageRoleUser,
 			Content: &arkmodel.ChatCompletionMessageContent{StringValue: stringPtr(m.Content)},
 		}, nil
+
 	case lpmodel.RoleAssistant:
+		var rc *string
+		if m.ReasoningContent != "" {
+			rc = stringPtr(m.ReasoningContent)
+		}
 		cm := &arkmodel.ChatCompletionMessage{
-			Role:    arkmodel.ChatMessageRoleAssistant,
-			Content: &arkmodel.ChatCompletionMessageContent{StringValue: stringPtr(m.Content)},
+			Role:             arkmodel.ChatMessageRoleAssistant,
+			Content:          &arkmodel.ChatCompletionMessageContent{StringValue: stringPtr(m.Content)},
+			ReasoningContent: rc,
 		}
 		if len(m.ToolCalls) > 0 {
 			for _, tc := range m.ToolCalls {
@@ -68,6 +74,7 @@ func oneArkMessage(m *lpmodel.Message) (*arkmodel.ChatCompletionMessage, error) 
 			}
 		}
 		return cm, nil
+
 	case lpmodel.RoleTool:
 		return &arkmodel.ChatCompletionMessage{
 			Role:       arkmodel.ChatMessageRoleTool,
@@ -196,9 +203,14 @@ func fromArkResponse(r *arkmodel.ChatCompletionResponse) *lpmodel.Message {
 	}
 	ch := r.Choices[0]
 	msg := ch.Message
+	reasoningContent := ""
+	if msg.ReasoningContent != nil {
+		reasoningContent = *msg.ReasoningContent
+	}
 	out := &lpmodel.Message{
-		Role:    lpmodel.RoleAssistant,
-		Content: chatMessageStringContent(msg.Content),
+		Role:             lpmodel.RoleAssistant,
+		Content:          chatMessageStringContent(msg.Content),
+		ReasoningContent: reasoningContent,
 	}
 	for _, tc := range msg.ToolCalls {
 		if tc == nil {

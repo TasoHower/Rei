@@ -212,16 +212,29 @@ func (a *Agent) RunLoop(
 		totalOutputTokens += sr.OutputTokens
 		lastText = sr.Text
 		msgs = append(msgs, &model.Message{
-			Role:         model.RoleAssistant,
-			Content:      sr.Text,
-			ToolCalls:    sr.ToolCalls,
-			InputTokens:  sr.InputTokens,
-			OutputTokens: sr.OutputTokens,
+			Role:             model.RoleAssistant,
+			Content:          sr.Text,
+			ReasoningContent: sr.ReasoningText,
+			ToolCalls:        sr.ToolCalls,
+			InputTokens:      sr.InputTokens,
+			OutputTokens:     sr.OutputTokens,
 		})
 
 		if len(sr.ToolCalls) == 0 {
 			if state != nil {
 				state.WaitAsyncSpawns(ctx)
+				// If async spawn children have completed, feed their
+				// results back to the LLM for a final response instead
+				// of exiting the loop immediately.
+				if results := state.FlushAsyncSpawnResults(); len(results) > 0 {
+					for _, r := range results {
+						msgs = append(msgs, &model.Message{
+							Role:    model.RoleUser,
+							Content: "The spawned subtask finished. Present this result to the user as your final answer (no more tool calls): " + r,
+						})
+					}
+					continue
+				}
 			}
 			pendingQueryEnd = buildOutcome(lastText, outcome.TerminationCompleted, step+1)
 			pendingQueryEndStep = step

@@ -213,7 +213,7 @@ func TestRunLoop_SpawnPath_RollupChildMetricsIntoParentOutcome(t *testing.T) {
 	}
 }
 
-func TestRunLoop_SpawnPath_ChildEventsForwardedToParentCh(t *testing.T) {
+func TestRunLoop_SpawnPath_ChildResultFedToParentLLM(t *testing.T) {
 	t.Parallel()
 	var childTmpl = &Agent{
 		Name:      "child",
@@ -239,31 +239,34 @@ func TestRunLoop_SpawnPath_ChildEventsForwardedToParentCh(t *testing.T) {
 		CurrentRunRef: &exchange.RunRef{RunID: "r", Depth: 0},
 	}
 	ctx := context.Background()
-	_ = par.RunLoop(ctx, &request.RuntimeRequest{UserMessage: "u", SessionID: "r"}, ch, nil, st)
+	outcome := par.RunLoop(ctx, &request.RuntimeRequest{UserMessage: "u", SessionID: "r"}, ch, nil, st)
 	close(ch)
 	events := collectEventChannel(ch)
-	// In async mode, intermediate child LLM events are NOT forwarded through
-	// the parent channel. Only parent events appear (2 rounds) + the final
-	// child answer delivered by the async goroutine.
+	// Parent LLM is called 3 times:
+	//   step 0: spawn_subagent tool call
+	//   step 1: parent replies (no tool calls)
+	//   step 2: child result injected → LLM called again
 	var callLLM int
 	for _, ev := range events {
 		if ev.CallLLMStart() != nil {
 			callLLM++
 		}
 	}
-	if callLLM != 2 {
-		t.Fatalf("expected 2 parent call_llm events, got %d", callLLM)
+	if callLLM != 3 {
+		t.Fatalf("expected 3 parent call_llm events, got %d", callLLM)
 	}
-	// Verify the child's final answer is forwarded as a single event
+	// Child answer is NOT forwarded to the event channel; it is injected as
+	// a message into the parent's LLM loop.
 	var childAnswers int
 	for _, ev := range events {
 		if a := ev.Answer(); a != nil && strings.Contains(a.Delta, "child") {
 			childAnswers++
 		}
 	}
-	if childAnswers == 0 {
-		t.Fatal("expected child final answer delivered to parent channel")
+	if childAnswers > 0 {
+		t.Fatalf("expected no child answers on event channel, got %d", childAnswers)
 	}
+	_ = outcome
 }
 
 // collectEventChannel returns events after a closed channel of pointers.

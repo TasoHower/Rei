@@ -1,4 +1,4 @@
-package lark
+package deepseek
 
 import (
 	"io"
@@ -6,8 +6,7 @@ import (
 
 	lpmodel "loopforge/pkg/model"
 
-	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
-	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/utils"
+	dspk "github.com/cohesion-org/deepseek-go"
 )
 
 type streamPart struct {
@@ -36,7 +35,6 @@ func (r *chanStreamReader) Recv() (*lpmodel.Message, error) {
 
 var _ lpmodel.MessageStreamReader = (*chanStreamReader)(nil)
 
-// toolCallAccumulator merges OpenAI-style streaming tool_call fragments (by index).
 type toolCallAccumulator struct {
 	byIndex map[int]*partialToolCall
 	order   []int
@@ -52,15 +50,9 @@ func newToolCallAccumulator() *toolCallAccumulator {
 	return &toolCallAccumulator{byIndex: make(map[int]*partialToolCall)}
 }
 
-func (a *toolCallAccumulator) addDeltas(deltas []*arkmodel.ToolCall) {
+func (a *toolCallAccumulator) addDeltas(deltas []dspk.ToolCall) {
 	for _, d := range deltas {
-		if d == nil {
-			continue
-		}
-		idx := 0
-		if d.Index != nil {
-			idx = *d.Index
-		}
+		idx := d.Index
 		p := a.byIndex[idx]
 		if p == nil {
 			p = &partialToolCall{}
@@ -102,16 +94,13 @@ func (a *toolCallAccumulator) toToolCalls() []lpmodel.ToolCallPart {
 	return out
 }
 
-func runChatCompletionStream(
-	stream *utils.ChatCompletionStreamReader,
-	out chan<- streamPart,
-) {
+func runChatCompletionStream(stream dspk.ChatCompletionStream, out chan<- streamPart) {
 	defer close(out)
 
 	var sbReasoning strings.Builder
 	var sbContent strings.Builder
 	tools := newToolCallAccumulator()
-	var lastUsage *arkmodel.Usage
+	var lastUsage *dspk.StreamUsage
 
 	for {
 		resp, err := stream.Recv()
@@ -127,24 +116,21 @@ func runChatCompletionStream(
 			lastUsage = &u
 		}
 		for _, ch := range resp.Choices {
-			if ch == nil {
-				continue
-			}
-			if rc := ch.Delta.ReasoningContent; rc != nil && *rc != "" {
-				sbReasoning.WriteString(*rc)
+			if rc := ch.Delta.ReasoningContent; rc != "" {
+				sbReasoning.WriteString(rc)
 				out <- streamPart{
 					msg: &lpmodel.Message{
 						Role:             lpmodel.RoleAssistant,
-						ReasoningContent: *rc,
+						ReasoningContent: rc,
 					},
 				}
 			}
-			if d := ch.Delta.Content; d != "" {
-				sbContent.WriteString(d)
+			if c := ch.Delta.Content; c != "" {
+				sbContent.WriteString(c)
 				out <- streamPart{
 					msg: &lpmodel.Message{
 						Role:    lpmodel.RoleAssistant,
-						Content: d,
+						Content: c,
 					},
 				}
 			}
@@ -154,13 +140,13 @@ func runChatCompletionStream(
 		}
 	}
 
+	reasoning := sbReasoning.String()
+	content := sbContent.String()
 	final := &lpmodel.Message{
-		Role:      lpmodel.RoleAssistant,
-		Content:   sbContent.String(),
-		ToolCalls: tools.toToolCalls(),
-	}
-	if rc := sbReasoning.String(); rc != "" {
-		final.ReasoningContent = rc
+		Role:             lpmodel.RoleAssistant,
+		Content:          content,
+		ReasoningContent: reasoning,
+		ToolCalls:        tools.toToolCalls(),
 	}
 	if lastUsage != nil {
 		final.InputTokens = int64(lastUsage.PromptTokens)

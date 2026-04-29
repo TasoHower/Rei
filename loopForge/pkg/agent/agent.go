@@ -45,6 +45,10 @@ type LoopState struct {
 	CurrentRunRef *exchange.RunRef
 	// asyncWG tracks background spawn tasks that should finish before QueryEnd.
 	asyncWG sync.WaitGroup
+	// asyncSpawnResults collects final text from async spawn children. After
+	// WaitAsyncSpawns, RunLoop reads these and feeds them back to the LLM.
+	asyncSpawnResults []string
+	asyncSpawnMu      sync.Mutex
 }
 
 // AddAsyncSpawn increments the async child task counter.
@@ -77,6 +81,28 @@ func (s *LoopState) WaitAsyncSpawns(ctx context.Context) {
 	case <-done:
 	case <-ctx.Done():
 	}
+}
+
+// CollectAsyncSpawnResult stores the final text of a completed async spawn child.
+func (s *LoopState) CollectAsyncSpawnResult(text string) {
+	if s == nil || text == "" {
+		return
+	}
+	s.asyncSpawnMu.Lock()
+	s.asyncSpawnResults = append(s.asyncSpawnResults, text)
+	s.asyncSpawnMu.Unlock()
+}
+
+// FlushAsyncSpawnResults returns and clears collected async spawn results.
+func (s *LoopState) FlushAsyncSpawnResults() []string {
+	if s == nil {
+		return nil
+	}
+	s.asyncSpawnMu.Lock()
+	defer s.asyncSpawnMu.Unlock()
+	r := s.asyncSpawnResults
+	s.asyncSpawnResults = nil
+	return r
 }
 
 // Agent is a concrete Runnable that drives a tool-calling loop using pkg/model.

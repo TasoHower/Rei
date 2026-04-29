@@ -14,12 +14,9 @@ const (
 	EventToolCallEnd   EventMessageType = "tool_call_end"
 	EventCallLLMStart  EventMessageType = "call_llm_start"
 	EventCallLLMEnd    EventMessageType = "call_llm_end"
-	EventCallRAGStart  EventMessageType = "call_rag_start"
-	EventCallRAGEnd    EventMessageType = "call_rag_end"
 	EventAgentTransfer EventMessageType = "agent_transfer"
 	EventVarChange     EventMessageType = "var_change"
 	EventQueryEnd      EventMessageType = "query_end"
-	EventWelcome       EventMessageType = "welcome"
 	EventError         EventMessageType = "error"
 )
 
@@ -39,20 +36,32 @@ type RuntimeEvent struct {
 
 // --- type-safe accessors ---
 
-func (e *RuntimeEvent) Start() *StartPayload             { p, _ := e.Payload.(*StartPayload); return p }
-func (e *RuntimeEvent) Question() *QuestionPayload        { p, _ := e.Payload.(*QuestionPayload); return p }
-func (e *RuntimeEvent) Answer() *AnswerPayload            { p, _ := e.Payload.(*AnswerPayload); return p }
-func (e *RuntimeEvent) ToolCallStart() *ToolCallStartPayload { p, _ := e.Payload.(*ToolCallStartPayload); return p }
-func (e *RuntimeEvent) ToolCallEnd() *ToolCallEndPayload  { p, _ := e.Payload.(*ToolCallEndPayload); return p }
-func (e *RuntimeEvent) CallLLMStart() *CallLLMStartPayload { p, _ := e.Payload.(*CallLLMStartPayload); return p }
-func (e *RuntimeEvent) CallLLMEnd() *CallLLMEndPayload    { p, _ := e.Payload.(*CallLLMEndPayload); return p }
-func (e *RuntimeEvent) CallRAGStart() *CallRAGStartPayload { p, _ := e.Payload.(*CallRAGStartPayload); return p }
-func (e *RuntimeEvent) CallRAGEnd() *CallRAGEndPayload    { p, _ := e.Payload.(*CallRAGEndPayload); return p }
-func (e *RuntimeEvent) AgentTransfer() *AgentTransferPayload { p, _ := e.Payload.(*AgentTransferPayload); return p }
-func (e *RuntimeEvent) VarChange() *VarChangePayload         { p, _ := e.Payload.(*VarChangePayload); return p }
-func (e *RuntimeEvent) QueryEnd() *QueryEndPayload           { p, _ := e.Payload.(*QueryEndPayload); return p }
-func (e *RuntimeEvent) Welcome() *WelcomePayload          { p, _ := e.Payload.(*WelcomePayload); return p }
-func (e *RuntimeEvent) Error() *ErrorPayload              { p, _ := e.Payload.(*ErrorPayload); return p }
+func (e *RuntimeEvent) Start() *StartPayload       { p, _ := e.Payload.(*StartPayload); return p }
+func (e *RuntimeEvent) Question() *QuestionPayload { p, _ := e.Payload.(*QuestionPayload); return p }
+func (e *RuntimeEvent) Answer() *AnswerPayload     { p, _ := e.Payload.(*AnswerPayload); return p }
+func (e *RuntimeEvent) ToolCallStart() *ToolCallStartPayload {
+	p, _ := e.Payload.(*ToolCallStartPayload)
+	return p
+}
+func (e *RuntimeEvent) ToolCallEnd() *ToolCallEndPayload {
+	p, _ := e.Payload.(*ToolCallEndPayload)
+	return p
+}
+func (e *RuntimeEvent) CallLLMStart() *CallLLMStartPayload {
+	p, _ := e.Payload.(*CallLLMStartPayload)
+	return p
+}
+func (e *RuntimeEvent) CallLLMEnd() *CallLLMEndPayload {
+	p, _ := e.Payload.(*CallLLMEndPayload)
+	return p
+}
+func (e *RuntimeEvent) AgentTransfer() *AgentTransferPayload {
+	p, _ := e.Payload.(*AgentTransferPayload)
+	return p
+}
+func (e *RuntimeEvent) VarChange() *VarChangePayload { p, _ := e.Payload.(*VarChangePayload); return p }
+func (e *RuntimeEvent) QueryEnd() *QueryEndPayload   { p, _ := e.Payload.(*QueryEndPayload); return p }
+func (e *RuntimeEvent) Error() *ErrorPayload         { p, _ := e.Payload.(*ErrorPayload); return p }
 
 // --- Payload types ---
 
@@ -67,7 +76,9 @@ type QuestionPayload struct {
 func (*QuestionPayload) eventPayload() EventMessageType { return EventQuestion }
 
 type AnswerPayload struct {
-	Delta string `json:"delta"`
+	Delta       string `json:"delta"`
+	IsReasoning bool   `json:"is_reasoning,omitempty"`
+	IsFinal     bool   `json:"is_final,omitempty"`
 }
 
 func (*AnswerPayload) eventPayload() EventMessageType { return EventAnswer }
@@ -135,14 +146,6 @@ type ToolCallEndPayload struct {
 
 func (*ToolCallEndPayload) eventPayload() EventMessageType { return EventToolCallEnd }
 
-type CallRAGStartPayload struct{}
-
-func (*CallRAGStartPayload) eventPayload() EventMessageType { return EventCallRAGStart }
-
-type CallRAGEndPayload struct{}
-
-func (*CallRAGEndPayload) eventPayload() EventMessageType { return EventCallRAGEnd }
-
 // TransferPhase distinguishes agent_transfer start vs end.
 type TransferPhase string
 
@@ -180,10 +183,6 @@ type QueryEndPayload struct {
 }
 
 func (*QueryEndPayload) eventPayload() EventMessageType { return EventQueryEnd }
-
-type WelcomePayload struct{}
-
-func (*WelcomePayload) eventPayload() EventMessageType { return EventWelcome }
 
 type ErrorPayload struct {
 	Code    string `json:"code"`

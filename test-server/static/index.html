@@ -252,6 +252,44 @@
       vertical-align: text-bottom;
       animation: blink 0.6s steps(2) infinite;
     }
+
+    /* reasoning （思考过程）气泡 — 灰底+斜体，与普通内容区分 */
+    .bubble.reasoning {
+      background: #2a2a35;
+      border: 1px solid #3a3a48;
+      border-radius: var(--radius) var(--radius) var(--radius) 4px;
+      color: #9a9ab0;
+      font-style: italic;
+      font-size: 13px;
+    }
+    .bubble.reasoning.streaming::after {
+      background: #9a9ab0;
+    }
+    .bubble.reasoning .reasoning-label {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      margin-bottom: 4px;
+      background: rgba(154,154,176,0.15);
+      color: #9a9ab0;
+      font-style: normal;
+    }
+    .bubble.reasoning .reasoning-caret {
+      display: inline-block;
+      vertical-align: middle;
+      margin-left: 4px;
+      font-style: normal;
+      animation: reasoningPulse 1.2s ease-in-out infinite;
+    }
+    @keyframes reasoningPulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+
     @keyframes blink {
       0% { opacity: 1; }
       100% { opacity: 0; }
@@ -560,6 +598,7 @@
     const sendBtn = document.getElementById('sendBtn');
 
     let currentAnswerBubble = null;
+    let currentReasoningBubble = null;
     let currentAgentName = null;
     let lastSenderIsAgent = false;
     let currentMode = 'skill';
@@ -763,9 +802,35 @@
     }
 
     function sealAgentBubble() {
+      sealReasoningBubble();
       if (currentAnswerBubble) {
         currentAnswerBubble.classList.remove('streaming');
         currentAnswerBubble = null;
+      }
+    }
+
+    function ensureReasoningBubble(agentName) {
+      if (currentReasoningBubble) return;
+      sealAgentBubble();
+      const row = document.createElement('div');
+      const agentKey = agentName != null ? String(agentName) : '';
+      row.dataset.agentName = agentKey;
+      row.className = 'bubble-row agent' + (shouldContinueAgentBubble(agentName) ? ' continuation' : '');
+      const label = agentName ? `<div class="reasoning-label">💭 thinking</div>` : '';
+      row.innerHTML = `<div class="avatar" style="background:#3a3a48;color:#9a9ab0;font-style:normal;">🧠</div><div class="bubble reasoning streaming">${label}<span class="reasoning-text"></span><span class="reasoning-caret">▎</span></div>`;
+      chatArea.appendChild(row);
+      currentReasoningBubble = row.querySelector('.bubble');
+      currentAgentName = agentName;
+      lastSenderIsAgent = true;
+      scroll();
+    }
+
+    function sealReasoningBubble() {
+      if (currentReasoningBubble) {
+        currentReasoningBubble.classList.remove('streaming');
+        const caret = currentReasoningBubble.querySelector('.reasoning-caret');
+        if (caret) caret.remove();
+        currentReasoningBubble = null;
       }
     }
 
@@ -934,8 +999,25 @@
           break;
 
         case 'answer':
-          ensureAgentBubble(currentAgentName);
-          currentAnswerBubble.textContent += (data.delta || '');
+          if (data.is_reasoning) {
+            ensureReasoningBubble(currentAgentName);
+            const textSpan = currentReasoningBubble.querySelector('.reasoning-text');
+            if (textSpan) {
+              if (data.is_final) {
+                textSpan.textContent = data.delta || '';
+              } else {
+                textSpan.textContent += data.delta || '';
+              }
+            }
+          } else {
+            sealReasoningBubble();
+            ensureAgentBubble(currentAgentName);
+            if (data.is_final) {
+              currentAnswerBubble.textContent = data.delta || '';
+            } else {
+              currentAnswerBubble.textContent += data.delta || '';
+            }
+          }
           scroll();
           break;
 

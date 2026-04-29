@@ -21,7 +21,7 @@ import (
 	"loopforge/pkg/log"
 	"loopforge/pkg/mcp/cfg"
 	"loopforge/pkg/model"
-	larkadapter "loopforge/pkg/model/adapters/lark"
+	deepseekadapter "loopforge/pkg/model/adapters/deepseek"
 	"loopforge/pkg/runner"
 	"loopforge/pkg/runtime/event"
 	"loopforge/pkg/runtime/exchange"
@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	defaultModel        = "deepseek-v3-2-251201"
+	defaultModel        = "deepseek-chat"
 	defaultSystemPrompt = `You are the loopForge test assistant (single-agent mode).
 
 Shared variables appear in a [Variables] block at the end of the system prompt. Keys starting with const_ are read-only; never call var_set on them.
@@ -44,17 +44,19 @@ Use var_set only when testing the variable store. If execute_shell_script or loa
 	defaultSpawnSystemPrompt = `You are the loopForge test assistant in spawn demo mode.
 
 **spawn_subagent** launches a sub-agent asynchronously. When you call it:
-  1. It returns IMMEDIATELY with {"status":"completed","child_ref":"...-async"} — you do NOT wait for the child.
-  2. The child runs independently, and its progress (tool calls, text output) appears as follow-up events to the user automatically.
-  3. You should reply to the user RIGHT AWAY after calling spawn_subagent, explaining that a subtask has been launched.
-  4. The child's final answer will also appear as its own event.
+  1. It returns IMMEDIATELY with {"status":"completed","child_ref":"..."} — the child runs in the background.
+  2. Reply to the user briefly after calling spawn_subagent (e.g. "The subtask is running...").
+  3. After you reply, the parent loop waits for the child to finish.
+  4. When the child completes, the parent receives its result and makes a final LLM call.
+  5. Summarize the child's result naturally for the user.
 
 Example:
   User: "calculate 123 * 456 + 789"
   You (call spawn_subagent with task "compute 123*456+789"):
     → returns immediately
-  You (reply to user): "I've launched a subtask for that calculation, results will appear shortly."
-  [child events stream automatically with tool calls and final answer]
+  You (reply to user): "Done. The subtask has been launched."
+  [parent waits for child]
+  You (after receiving child result): "The computation result is: ..."
 
 Call with: {"task": "<concrete subtask>"}
 
@@ -103,14 +105,14 @@ type SSEEvent struct {
 
 func (r *ChatRequest) resolveDefaults() {
 	if r.APIKey == "" {
-		r.APIKey = firstNonEmpty(os.Getenv("LARK_API_KEY"), os.Getenv("DOUBAO_API_KEY"), os.Getenv("ARK_API_KEY"))
+		r.APIKey = firstNonEmpty(os.Getenv("DEEPSEEK_API_KEY"))
 	}
 	if r.BaseURL == "" {
-		r.BaseURL = firstNonEmpty(os.Getenv("LARK_BASE_URL"), os.Getenv("DOUBAO_BASE_URL"), larkadapter.DefaultBaseURL)
+		r.BaseURL = firstNonEmpty(os.Getenv("DEEPSEEK_BASE_URL"), deepseekadapter.DefaultBaseURL)
 	}
 	r.BaseURL = strings.TrimRight(strings.TrimSpace(r.BaseURL), "/")
 	if r.Model == "" {
-		r.Model = firstNonEmpty(os.Getenv("LARK_MODEL"), os.Getenv("ARK_MODEL"), os.Getenv("DOUBAO_MODEL"), defaultModel)
+		r.Model = firstNonEmpty(os.Getenv("DEEPSEEK_MODEL"), defaultModel)
 	}
 	if r.SystemPrompt == "" {
 		if r.SkillDebug {
@@ -317,7 +319,7 @@ func buildSingleAgent(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffi
 		opts = append(opts, agent.WithLoadSkillTool(true))
 	}
 	a := agent.New(nil, opts...)
-	runner.ApplyLarkFromConfig(a, req.APIKey, req.BaseURL, req.Model)
+	runner.ApplyDeepSeekFromConfig(a, req.APIKey, req.BaseURL, req.Model)
 	return a
 }
 
@@ -337,7 +339,7 @@ func buildSpawnAgent(req *ChatRequest, reg *skill.SkillRegistry) *agent.Agent {
 	}
 	childOpts = appendSkillRuntimeOpts(req, reg, childOpts)
 	childTmpl := agent.New(nil, childOpts...)
-	runner.ApplyLarkFromConfig(childTmpl, req.APIKey, req.BaseURL, req.Model)
+	runner.ApplyDeepSeekFromConfig(childTmpl, req.APIKey, req.BaseURL, req.Model)
 
 	pSys := req.SystemPrompt
 
@@ -362,7 +364,7 @@ func buildSpawnAgent(req *ChatRequest, reg *skill.SkillRegistry) *agent.Agent {
 	}
 	pOpts = appendSkillRuntimeOpts(req, reg, pOpts)
 	par := agent.New(nil, pOpts...)
-	runner.ApplyLarkFromConfig(par, req.APIKey, req.BaseURL, req.Model)
+	runner.ApplyDeepSeekFromConfig(par, req.APIKey, req.BaseURL, req.Model)
 	return par
 }
 
@@ -397,7 +399,7 @@ Always call transfer to a specialist.`),
 	}
 	triageOpts = appendSkillRuntimeOpts(req, reg, triageOpts)
 	triage := agent.New(nil, triageOpts...)
-	runner.ApplyLarkFromConfig(triage, req.APIKey, req.BaseURL, req.Model)
+	runner.ApplyDeepSeekFromConfig(triage, req.APIKey, req.BaseURL, req.Model)
 
 	mathSys := `You are the arithmetic specialist (math_expert). Call tools for every numeric step; never compute mentally.
 When MCP arithmetic tools are listed (names may be prefixed), use only those for calculations. If no MCP server is attached, use the built-in tools add, subtract, multiply, divide.

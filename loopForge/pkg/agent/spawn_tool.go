@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/bytedance/sonic"
 
@@ -13,19 +14,6 @@ import (
 	"loopforge/pkg/runtime/outcome"
 	"loopforge/pkg/runtime/request"
 )
-
-func tryEmitRuntimeEvent(eventCh chan<- *event.RuntimeEvent, ev *event.RuntimeEvent) {
-	if eventCh == nil || ev == nil {
-		return
-	}
-	defer func() {
-		_ = recover()
-	}()
-	select {
-	case eventCh <- ev:
-	default:
-	}
-}
 
 type spawnSubagentArgs struct {
 	Task            string   `json:"task"`
@@ -54,7 +42,10 @@ func addChildRunMetricsToLoopState(st *LoopState, child outcome.RunMetrics) {
 // buildSpawnSubagentVarTool returns a runtime [model.ToolInfo] for the spawn builtin, or nil
 // when the agent is not configured for spawn or depth disallows another child.
 // eventCh, when non-nil, switches the spawn handler to async mode: the handler returns
-// immediately with a "started" result while child events are forwarded to eventCh.
+// immediately so the parent LLM can continue, while the child runs in the background.
+// The parent's RunLoop calls WaitAsyncSpawns before emitting QueryEnd, ensuring the child
+// completes before the parent exits. The child's final answer is delivered as an AnswerPayload
+// on the event channel when it finishes.
 func buildSpawnSubagentVarTool(parent *exchange.RunRef, parentTemplate *Agent, req *request.RuntimeRequest, loop *LoopState, eventCh chan<- *event.RuntimeEvent) *model.ToolInfo {
 	if parentTemplate == nil || parent == nil {
 		return nil
@@ -156,12 +147,11 @@ func makeSpawnHandler(
 		}
 
 		if eventCh != nil {
-			// Async mode: return immediately so the parent LLM can reply to
-			// the user right away, while the child runs in the background.
-			// We do NOT forward intermediate child events through the parent
-			// channel (which would cause ordering race with parent events);
-			// instead the goroutine sends a single completion event on behalf
-			// of the child when it finishes.
+			// Async mode: return immediately so the parent LLM can continue,
+			// while the child runs in the background. The parent's RunLoop
+			// calls WaitAsyncSpawns before emitting QueryEnd, ensuring the
+			// child completes first. When the child finishes, its final answer
+			// is delivered as a single AnswerPayload on the event channel.
 			if loop != nil {
 				loop.AddAsyncSpawn()
 			}
@@ -171,16 +161,20 @@ func makeSpawnHandler(
 				}
 				res, err := sp.Spawn(ctx, derefRef(parent), spec)
 				if err != nil {
+					slog.Warn("spawn child agent failed", "error", err)
 					return
 				}
 				if res != nil {
 					addChildRunMetricsToLoopState(loop, res.Metrics)
-					// Deliver the child's final answer as a single event on the
-					// parent SSE stream (non-blocking send in case the channel
-					// is already closed).
-					if res.FinalText != "" {
-						tryEmitRuntimeEvent(eventCh, event.Emit(res.ChildRunRef.RunID, 0, &event.AnswerPayload{Delta: res.FinalText}))
-					}
+					slog.Info("spawn child agent completed",
+						"child_run_id", res.ChildRunRef.RunID,
+						"status", res.Status,
+						"final_text_len", len(res.FinalText),
+						"input_tokens", res.Metrics.InputTokens,
+						"output_tokens", res.Metrics.OutputTokens,
+						"steps", res.Metrics.Steps,
+					)
+					loop.CollectAsyncSpawnResult(res.FinalText)
 				}
 			}()
 			return sonic.MarshalString(&exchange.SpawnResult{
@@ -197,6 +191,14 @@ func makeSpawnHandler(
 		}
 		if res != nil {
 			addChildRunMetricsToLoopState(loop, res.Metrics)
+			slog.Info("spawn child agent completed",
+				"child_run_id", res.ChildRunRef.RunID,
+				"status", res.Status,
+				"final_text_len", len(res.FinalText),
+				"input_tokens", res.Metrics.InputTokens,
+				"output_tokens", res.Metrics.OutputTokens,
+				"steps", res.Metrics.Steps,
+			)
 		}
 		return sonic.MarshalString(res)
 	}

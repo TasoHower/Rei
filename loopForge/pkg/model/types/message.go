@@ -33,6 +33,12 @@ type Message struct {
 	ToolCallID string
 	Name       string // tool name (optional, for tracing)
 
+	// ReasoningContent holds the chain-of-thought / reasoning text returned by
+	// thinking-capable models (e.g. DeepSeek-R1).  Populated by model adapters;
+	// round-tripped via the ReasoningContent field itself, or via Content markers
+	// when the upstream model adapter does not know the field.
+	ReasoningContent string `json:"-"`
+
 	// Usage: populated by model adapters when available (assistant messages only).
 	InputTokens  int64 `json:"-"`
 	OutputTokens int64 `json:"-"`
