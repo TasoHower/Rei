@@ -38,7 +38,8 @@
 2. **Step 2** — 生成计划：各顶模块 `doc/plan/plan-v*.md`（**实施拆分**）并与 `doc/log/progress-v*.md` 配套，**先 plan 后编码**
 3. **Step 3** — 实施代码并更新版本日志（`doc/log/progress-v*.md`）
 4. **Step 4** — 验收代码（`doc/acceptance/v0.7.0-acceptance.md`）
-5. **Step 5** — 提交代码（`git commit`）
+5. **Step 5** — 提交代码（`git commit`）、创建 git tag（`git tag v0.9.7`）,经过允许以后提交到远程仓库
+6. **Step 6** — 反思本次工作流程，更新 `AGENTS.md`
 
 **未经用户明确确认，不得进入下一步。**
 

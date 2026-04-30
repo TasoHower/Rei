@@ -7,40 +7,28 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/bytedance/sonic"
 	lferrors "loopforge/pkg/errors"
 	"loopforge/pkg/model"
+	"loopforge/pkg/tool/autoreg"
 )
 
 const varSetToolName = "var_set"
 
+type varSetParams struct {
+	Updates map[string]interface{} `json:"updates,omitempty" description:"Map from variable name to JSON value. Include only variables you are changing; leave others out."`
+	Key     string                 `json:"key,omitempty"    description:"Legacy: single variable name (use updates for multiple keys)."`
+	Value   json.RawMessage        `json:"value,omitempty"  description:"Legacy: JSON object value for key (ignored when updates is non-empty)."`
+}
+
 // VarSetTool returns a ToolInfo for LLM-driven variable assignment (const_ keys rejected).
 func VarSetTool(store *VarStore) *model.ToolInfo {
-	return &model.ToolInfo{
-		Name: varSetToolName,
-		Description: "Set one or more shared variables in a single call. " +
-			"Pass only keys you need to change inside `updates`; omit variables that stay the same. " +
-			"Keys prefixed with const_ are read-only and cannot be set here. " +
+	return autoreg.NewToolFromStruct(varSetToolName,
+		"Set one or more shared variables in a single call. "+
+			"Pass only keys you need to change inside `updates`; omit variables that stay the same. "+
+			"Keys prefixed with const_ are read-only and cannot be set here. "+
 			"Legacy single-field form `key` + `value` is still accepted.",
-		Parameters: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"updates": map[string]interface{}{
-					"type":        "object",
-					"description": "Map from variable name to JSON value. Include only variables you are changing; leave others out.",
-				},
-				"key": map[string]interface{}{
-					"type":        "string",
-					"description": "Legacy: single variable name (use `updates` for multiple keys).",
-				},
-				"value": map[string]interface{}{
-					"type":        "object",
-					"description": "Legacy: JSON object value for `key` (ignored when `updates` is non-empty).",
-				},
-			},
-		},
-		Handle: func(ctx context.Context, argumentsJSON string) (string, error) {
-			slog.Debug("var_set begin", "args_len", len(argumentsJSON))
+		func(ctx context.Context, p varSetParams) (string, error) {
+			slog.Debug("var_set begin", "updates_len", len(p.Updates), "key", p.Key)
 			if store == nil {
 				s := FromContext(ctx)
 				if s == nil {
@@ -49,31 +37,17 @@ func VarSetTool(store *VarStore) *model.ToolInfo {
 				}
 				store = s
 			}
-			var envelope struct {
-				Updates map[string]json.RawMessage `json:"updates"`
-				Key     string                     `json:"key"`
-				Value   json.RawMessage            `json:"value"`
-			}
-			if err := sonic.UnmarshalString(argumentsJSON, &envelope); err != nil {
-				slog.Warn("var_set parse arguments failed", "err", err)
-				return "", fmt.Errorf("parse var_set arguments: %w", err)
-			}
 
-			if len(envelope.Updates) > 0 {
-				keys := make([]string, 0, len(envelope.Updates))
-				for k := range envelope.Updates {
+			if len(p.Updates) > 0 {
+				keys := make([]string, 0, len(p.Updates))
+				for k := range p.Updates {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
 				for _, k := range keys {
-					raw := envelope.Updates[k]
+					val := p.Updates[k]
 					if k == "" {
 						return "", fmt.Errorf("%w: empty key in updates", lferrors.ErrInvalidRequest)
-					}
-					val, err := parseVarSetJSONValue(raw)
-					if err != nil {
-						slog.Warn("var_set parse value failed", "key", k, "err", err)
-						return "", fmt.Errorf("parse var_set value for %q: %w", k, err)
 					}
 					slog.Info("var_set applying", "key", k, "value_type", fmt.Sprintf("%T", val))
 					if err := store.AgentSet(k, val); err != nil {
@@ -85,23 +59,23 @@ func VarSetTool(store *VarStore) *model.ToolInfo {
 				return "ok", nil
 			}
 
-			if envelope.Key == "" {
+			if p.Key == "" {
 				return "", fmt.Errorf("%w: provide non-empty `updates` or legacy `key`", lferrors.ErrInvalidRequest)
 			}
-			val, err := parseVarSetJSONValue(envelope.Value)
+			val, err := parseVarSetJSONValue(p.Value)
 			if err != nil {
-				slog.Warn("var_set parse value failed", "key", envelope.Key, "err", err)
+				slog.Warn("var_set parse value failed", "key", p.Key, "err", err)
 				return "", fmt.Errorf("parse var_set value: %w", err)
 			}
-			slog.Info("var_set applying", "key", envelope.Key, "value_type", fmt.Sprintf("%T", val))
-			if err := store.AgentSet(envelope.Key, val); err != nil {
-				slog.Warn("var_set AgentSet rejected", "key", envelope.Key, "err", err)
+			slog.Info("var_set applying", "key", p.Key, "value_type", fmt.Sprintf("%T", val))
+			if err := store.AgentSet(p.Key, val); err != nil {
+				slog.Warn("var_set AgentSet rejected", "key", p.Key, "err", err)
 				return "", err
 			}
-			slog.Info("var_set ok", "key", envelope.Key)
+			slog.Info("var_set ok", "key", p.Key)
 			return "ok", nil
 		},
-	}
+	)
 }
 
 func parseVarSetJSONValue(raw json.RawMessage) (any, error) {
@@ -109,7 +83,7 @@ func parseVarSetJSONValue(raw json.RawMessage) (any, error) {
 		return nil, nil
 	}
 	var val any
-	if err := sonic.Unmarshal(raw, &val); err != nil {
+	if err := json.Unmarshal(raw, &val); err != nil {
 		return nil, err
 	}
 	return val, nil

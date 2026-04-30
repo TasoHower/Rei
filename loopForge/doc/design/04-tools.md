@@ -127,7 +127,9 @@ Agent 有三类工具来源，按注册方式区分：
 
 ### 2.1 本地工具注册
 
-调用方通过 `agent.WithToolInfos` 注册本地 Go 函数：
+调用方通过 `agent.WithToolInfos` 注册本地 Go 函数。
+
+#### 传统方式（手动 Parameters，仍兼容）
 
 ```go
 local := []*model.ToolInfo{{
@@ -152,6 +154,29 @@ ag := agent.New(chat,
 	agent.WithToolInfos(local),
 )
 ```
+
+#### 自动化注册（推荐，v0.9.7+）
+
+使用 `pkg/tool/autoreg` 包的 `NewToolFromStruct`，通过 Go struct 类型反射自动生成 JSON Schema，Handler 直接接收解析后的类型化参数：
+
+```go
+type addParams struct {
+	A float64 `json:"a" description:"First operand"`
+	B float64 `json:"b" description:"Second operand"`
+}
+
+addTool := autoreg.NewToolFromStruct("add", "Add two numbers",
+	func(ctx context.Context, p addParams) (string, error) {
+		return fmt.Sprintf("%f", p.A+p.B), nil
+	},
+)
+
+ag := agent.New(chat,
+	agent.WithToolInfos([]*model.ToolInfo{addTool}),
+)
+```
+
+两种方式可以混合使用。自动化注册是推荐方式，手写 Parameters 将在未来版本中标记为废弃（详见 §9）。
 
 ### 2.2 MCP 工具注册
 
@@ -305,6 +330,8 @@ func Invoke(ctx context.Context, infos []*model.ToolInfo, ex ToolExecutor, tc mo
 |------|------|
 | `pkg/model/types/toolinfo.go` | ToolInfo 结构体 |
 | `pkg/model/types/message.go` | ToolCallPart 结构体、ToolCallHandler 类型 |
+| `pkg/tool/autoreg/schema.go` | `SchemaFromStruct[T]` — 反射式 JSON Schema 自动生成 |
+| `pkg/tool/autoreg/handler.go` | `NewToolFromStruct[T]` — 类型安全注册器 + `WithParameters` 废弃兼容 |
 | `pkg/tool/dispatch.go` | Invoke（三级分派）、ValidateBindings |
 | `pkg/tool/executor.go` | ToolExecutor 接口 |
 | `pkg/tool/map.go` | MapToolExecutor 实现 |
@@ -325,8 +352,114 @@ func Invoke(ctx context.Context, infos []*model.ToolInfo, ex ToolExecutor, tc mo
 
 ---
 
+## 9. 自动化注册（v0.9.7+）
+
+### 9.1 动机
+
+传统工具注册需要手动编写 JSON Schema `Parameters`（嵌套的 `map[string]interface{}`），并在 Handle 内手动解析 `argumentsJSON`。这种方式：
+
+- **类型不安全**：Parameters 与 Go struct 脱节，字段修改时必须同步两处
+- **样板代码多**：每个工具都有相同的 `sonic.UnmarshalString(argumentsJSON, &payload)` 重复代码
+- **新增成本高**：写一个新工具至少需要定义 struct → 手写 Parameters → 在 Handle 中 Unmarshal → 错误处理
+
+### 9.2 核心设施
+
+`pkg/tool/autoreg` 包提供两个核心函数：
+
+#### SchemaFromStruct[T] — JSON Schema 反射生成器
+
+```go
+func SchemaFromStruct[T any]() map[string]interface{}
+```
+
+Go 类型 → JSON Schema 映射规则：
+
+| Go 类型 | JSON Schema |
+|---------|-------------|
+| `string` | `{"type": "string"}` |
+| `int`, `int8`...`int64` | `{"type": "integer"}` |
+| `float32`, `float64` | `{"type": "number"}` |
+| `bool` | `{"type": "boolean"}` |
+| `[]T` | `{"type": "array", "items": {T's schema}}` |
+| `map[string]V` | `{"type": "object", "additionalProperties": {V's schema}}` |
+| `map[string]interface{}` / `map[string]json.RawMessage` | `{"type": "object"}`（无约束） |
+| `*T`（指针） | T's schema，可选 |
+| struct（嵌套） | 递归生成 |
+| `json.RawMessage` | `{"type": "object"}` |
+
+`required` 推导：
+- `json` tag 中**不含 `omitempty`** 且非指针、非 `json.RawMessage` 的字段 → 必选
+- 指针字段（`*T`）、含 `omitempty` 的字段 → 可选
+- 所有字段均为可选时，**省略 `"required"` 键**
+
+`description` 读取：从 `description` struct tag 读取。
+
+#### NewToolFromStruct — 类型安全注册器
+
+```go
+func NewToolFromStruct[T any](
+    name, description string,
+    handler ToolHandlerTyped[T],
+    opts ...ToolOption,
+) *model.ToolInfo
+```
+
+`ToolHandlerTyped[T]` 是类型化的 Handler 签名：
+
+```go
+type ToolHandlerTyped[T any] func(ctx context.Context, params T) (string, error)
+```
+
+`NewToolFromStruct` 自动完成：
+1. 调用 `SchemaFromStruct[T]()` 生成 Parameters
+2. 构造 Handle 闭包（自动将 `argumentsJSON` 反序列化为 `T` 后调用 typed handler）
+3. 返回 `*model.ToolInfo`
+
+### 9.3 Parameters 废弃策略
+
+为保持向后兼容，`NewToolFromStruct` 接受 `ToolOption` 变长参数：
+
+| Option | 作用 | 状态 |
+|--------|------|------|
+| `WithParameters(params)` | 覆盖自动生成的 Parameters | **已废弃** — 触发 `slog.Warn` 警告 |
+
+**冲突风险**：自动生成的 Handle 按 struct `T` 的字段反序列化 `argumentsJSON`。如果通过 `WithParameters` 传入与 struct 字段不匹配的 JSON Schema（如 struct 定义 `string` 但 Parameters 声明 `integer`），LLM 可能生成错误类型的参数，导致 Handle 反序列化失败。
+
+**废弃时间线**：
+
+| 阶段 | 版本 | 行为 |
+|------|------|------|
+| 当前 | v0.9.7 | `WithParameters` 接受，触发 `slog.Warn` 警告 |
+| 下个大版本 | v0.10.x | 警告升级为 `slog.Error` |
+| 未来 | v1.0.0 | `WithParameters` 移除，Parameters 仅由反射生成 |
+
+### 9.4 最佳实践
+
+```go
+// 1. 定义参数结构体（json tag + description tag）
+type searchParams struct {
+    Query string `json:"query" description:"Search query (required)"`
+    Limit int    `json:"limit,omitempty" description:"Max results (optional, default 10)"`
+}
+
+// 2. 通过自动化注册创建工具
+searchTool := autoreg.NewToolFromStruct("search", "Search the knowledge base",
+    func(ctx context.Context, p searchParams) (string, error) {
+        return doSearch(ctx, p.Query, p.Limit)
+    },
+)
+
+// 3. 正常注册到 Agent
+ag := agent.New(chat,
+    agent.WithToolInfos([]*model.ToolInfo{searchTool}),
+)
+```
+
+---
+
 # 变更日志
 | 日期 | 版本 | 变更说明 |
 |------|------|----------|
+| 2026-04-30 | v0.9.7 | 新增 §9 自动化注册章节，§2.1 新增自动化注册示例，§7 文件表追加 `autoreg/`。 |
 | 2026-04-30 | v0.9.5 | 初稿：工具注册体系（三类来源）、bindModel 绑定流程、executeToolCalls 执行流程、Invoke 三级分派。 |
 | 2026-04-30 | v0.9.5 | MCP 内容拆出至 05-mcp-tools.md，§6 缩减为引用；新增 06-变量.md 交叉引用。 |

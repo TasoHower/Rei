@@ -26,11 +26,13 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/modelcontextprotocol/go-sdk v1.5.0 // indirect
 	github.com/ollama/ollama v0.6.5 // indirect
+	github.com/openai/openai-go v1.12.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.0 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/volcengine/volc-sdk-golang v1.0.23 // indirect
 	github.com/volcengine/volcengine-go-sdk v1.2.24 // indirect
