@@ -15,6 +15,8 @@ const (
 	EventCallLLMStart  EventMessageType = "call_llm_start"
 	EventCallLLMEnd    EventMessageType = "call_llm_end"
 	EventAgentTransfer EventMessageType = "agent_transfer"
+	EventSpawnStart    EventMessageType = "spawn_start"
+	EventSpawnEnd      EventMessageType = "spawn_end"
 	EventVarChange     EventMessageType = "var_change"
 	EventQueryEnd      EventMessageType = "query_end"
 	EventError         EventMessageType = "error"
@@ -57,6 +59,14 @@ func (e *RuntimeEvent) CallLLMEnd() *CallLLMEndPayload {
 }
 func (e *RuntimeEvent) AgentTransfer() *AgentTransferPayload {
 	p, _ := e.Payload.(*AgentTransferPayload)
+	return p
+}
+func (e *RuntimeEvent) SpawnStart() *SpawnStartPayload {
+	p, _ := e.Payload.(*SpawnStartPayload)
+	return p
+}
+func (e *RuntimeEvent) SpawnEnd() *SpawnEndPayload {
+	p, _ := e.Payload.(*SpawnEndPayload)
 	return p
 }
 func (e *RuntimeEvent) VarChange() *VarChangePayload { p, _ := e.Payload.(*VarChangePayload); return p }
@@ -155,16 +165,39 @@ const (
 )
 
 type AgentTransferPayload struct {
-	Phase      TransferPhase `json:"phase"`
-	FromAgent  string        `json:"from_agent"`
-	ToAgent    string        `json:"to_agent"`
-	Reason     string        `json:"reason,omitempty"`
-	ChildRunID string        `json:"child_run_id,omitempty"`
-	Depth      int           `json:"depth,omitempty"`
-	OK         bool          `json:"ok,omitempty"`
+	Phase     TransferPhase `json:"phase"`
+	FromAgent string        `json:"from_agent"`
+	ToAgent   string        `json:"to_agent"`
+	Reason    string        `json:"reason,omitempty"`
 }
 
 func (*AgentTransferPayload) eventPayload() EventMessageType { return EventAgentTransfer }
+
+// SpawnStartPayload 描述子 Agent 启动信息。
+type SpawnStartPayload struct {
+	ChildRunID  string `json:"child_run_id"`
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	AgentRole   string `json:"agent_role"`
+	Depth       int    `json:"depth"`
+	TaskSummary string `json:"task_summary,omitempty"`
+}
+
+func (*SpawnStartPayload) eventPayload() EventMessageType { return EventSpawnStart }
+
+// SpawnEndPayload 描述子 Agent 结束信息。
+type SpawnEndPayload struct {
+	ChildRunID   string              `json:"child_run_id"`
+	ParentRunID  string              `json:"parent_run_id,omitempty"`
+	AgentRole    string              `json:"agent_role"`
+	Depth        int                 `json:"depth"`
+	OK           bool                `json:"ok"`
+	Status       string              `json:"status"`
+	ErrorCode    string              `json:"error_code,omitempty"`
+	FinalTextLen int                 `json:"final_text_len,omitempty"`
+	Metrics      *outcome.RunMetrics `json:"metrics,omitempty"`
+}
+
+func (*SpawnEndPayload) eventPayload() EventMessageType { return EventSpawnEnd }
 
 // VarChangePayload is emitted whenever a shared variable is written or deleted.
 type VarChangePayload struct {

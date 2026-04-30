@@ -24,7 +24,7 @@ Transfer 是 Agent 之间的**handoff 任务交接**。与 spawn（创建子 Age
 | 对话上下文 | Agent B 继承 Agent A 的**完整消息历史** | 子 Agent 默认**完全隔离**（仅可选 MemoryDigest） |
 | 触发方式 | LLM 调用 `transfer_to_xxx` 工具 | LLM 调用 `spawn_subagent` 工具 |
 | 结果处理 | Agent B 直接输出最终回答给用户 | 子结果回注到父对话，父 LLM 再总结 |
-| 事件标记 | `agent_transfer(phase=start)` | `agent_transfer(phase=start/end, depth>0)` |
+| 事件标记 | `agent_transfer(phase=start)` | `spawn_start / spawn_end` |
 
 ---
 

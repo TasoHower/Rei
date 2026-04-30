@@ -1055,26 +1055,38 @@
 
         case 'agent_transfer': {
             sealAgentBubble();
-            if ((data.phase === 'start' || data.phase === 'end') && (data.depth || 0) > 0) {
-                const isStart = data.phase === 'start';
-                const childName = data.to_agent || 'child';
-                const childID = data.child_run_id || '';
-                if (isStart) {
-                    addSysInfo('spawn', 'SPAWN',
-                        childName + ' · depth=' + (data.depth || 0) +
-                        (childID ? ' · ' + childID : ''));
-                } else {
-                    const ok = data.ok !== false;
-                    addSysInfo('spawn', ok ? 'SPAWN ✓' : 'SPAWN ✗',
-                        childName + (ok ? ' completed' : ' failed') +
-                        (childID ? ' · ' + childID : ''));
-                }
-            } else {
-                const from = data.from_agent || '';
-                const to = data.to_agent || '';
-                const reason = data.reason || '';
-                addTransferBanner(from, to, reason);
+            const from = data.from_agent || '';
+            const to = data.to_agent || '';
+            const reason = data.reason || '';
+            addTransferBanner(from, to, reason);
+            break;
+        }
+
+        case 'spawn_start': {
+            sealAgentBubble();
+            const childName = data.agent_role || 'child';
+            const childID = data.child_run_id || '';
+            addSysInfo('spawn', 'SPAWN',
+                childName + ' · depth=' + (data.depth || 0) +
+                (childID ? ' · ' + childID : ''));
+            break;
+        }
+
+        case 'spawn_end': {
+            sealAgentBubble();
+            const childName2 = data.agent_role || 'child';
+            const childID2 = data.child_run_id || '';
+            const ok = data.ok !== false;
+            let info = childName2 + (ok ? ' completed' : ' failed');
+            if (data.error_code) {
+                info += ' · ' + data.error_code;
             }
+            if (data.metrics) {
+                const m = data.metrics;
+                info += ' · tokens: ' + ((m.total_tokens || m.TotalTokens) || 0);
+            }
+            addSysInfo('spawn', ok ? 'SPAWN ✓' : 'SPAWN ✗',
+                info + (childID2 ? ' · ' + childID2 : ''));
             break;
         }
 

@@ -619,6 +619,14 @@ func runtimeEventToSSE(ev *event.RuntimeEvent) SSEEvent {
 		if p := ev.AgentTransfer(); p != nil {
 			out.Data = p
 		}
+	case event.EventSpawnStart:
+		if p := ev.SpawnStart(); p != nil {
+			out.Data = p
+		}
+	case event.EventSpawnEnd:
+		if p := ev.SpawnEnd(); p != nil {
+			out.Data = p
+		}
 	case event.EventError:
 		if p := ev.Error(); p != nil {
 			out.Data = p

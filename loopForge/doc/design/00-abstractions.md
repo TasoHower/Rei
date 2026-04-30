@@ -465,7 +465,9 @@ type RuntimeEvent struct {
 | `EventCallLLMEnd` | `"call_llm_end"` | LLM 调用结束（含 finish_reason、tokens） |
 | `EventToolCallStart` | `"tool_call_start"` | 工具调用开始（含 name、arguments） |
 | `EventToolCallEnd` | `"tool_call_end"` | 工具调用结束（含 output、is_error） |
-| `EventAgentTransfer` | `"agent_transfer"` | Agent 手递手转移；或 spawn 子树起止（见 `event-semantics.md` ADR） |
+| `EventAgentTransfer` | `"agent_transfer"` | Agent 手递手转移 |
+| `EventSpawnStart`    | `"spawn_start"`    | 子 Agent 启动    |
+| `EventSpawnEnd`      | `"spawn_end"`      | 子 Agent 结束    |
 | `EventVarChange` | `"var_change"` | 变量变更（当前 RunLoop 未统一 emit） |
 | `EventQueryEnd` | `"query_end"` | 本轮用户轮次结束（含 RuntimeOutcome） |
 | `EventError` | `"error"` | 运行时错误 |
@@ -503,7 +505,7 @@ start → question → call_llm_start → call_llm_end
    → query_end (payload.Outcome)
 ```
 
-Transfer 模式下会插入 `agent_transfer(TransferStart/TransferEnd)`；spawn 模式下新增 `agent_transfer(phase=start/end, depth>0)` 事件。
+Transfer 模式下会插入 `agent_transfer(TransferStart/TransferEnd)`；spawn 模式下新增 `spawn_start` / `spawn_end` 事件。
 
 ---
 
@@ -769,7 +771,7 @@ res, _ := conn.CallTool(ctx, "mcp_tool_name", map[string]any{...})    // 直接�
 | 文档 | 内容 |
 |------|------|
 | `doc/decision/engine-layering.md` | 三层引擎架构设计决策 |
-| `doc/decision/event-semantics.md` | agent_transfer 用于 spawn 生命周期决策 |
+| `doc/decision/event-semantics.md` | spawn_start / spawn_end 事件语义决策 |
 | `doc/decision/spawn-isolation.md` | 子 Agent 事件隔离机制决策 |
 | `doc/design/data-fusion.md` | 事件类型与现网对齐 |
 | `doc/design/multi-agent-engine.md` | 多 Agent、路线图 |

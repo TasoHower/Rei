@@ -161,7 +161,7 @@ runTransferLoop(ctx, req, ch, runState, policy)
   │     │     target = TargetAgent(result.ToolCall.Name)   // 从工具名提取 Agent 名
   │     │     next = findHandoff(current, target)           // 从 handoffs 中查找
   │     │
-  │     ├── emit(agent_transfer, phase=start)             // 通知前端
+  │     ├── emit(agent_transfer, phase=start)             // 通知前端 transfer
   │     │
   │     ├── 构造继承消息：
   │     │     inheritedMsgs = appendSyntheticToolResponsesAfterTransfer(...)

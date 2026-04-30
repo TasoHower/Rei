@@ -34,7 +34,9 @@ const (
 	EventToolCallEnd   EventMessageType = "tool_call_end"     // 工具调用结束
 	EventCallLLMStart  EventMessageType = "call_llm_start"    // LLM 调用开始
 	EventCallLLMEnd    EventMessageType = "call_llm_end"      // LLM 调用结束
-	EventAgentTransfer EventMessageType = "agent_transfer"    // Agent 转移或 spawn 子树起止
+	EventAgentTransfer EventMessageType = "agent_transfer"    // Agent 手递手转移
+	EventSpawnStart    EventMessageType = "spawn_start"       // 子 Agent 启动
+	EventSpawnEnd      EventMessageType = "spawn_end"         // 子 Agent 结束
 	EventVarChange     EventMessageType = "var_change"        // 变量变更
 	EventQueryEnd      EventMessageType = "query_end"         // 本轮执行结束
 	EventError         EventMessageType = "error"             // 运行时错误
@@ -211,44 +213,82 @@ type ToolCallEndPayload struct {
 
 ***
 
-### 2.8 `agent_transfer` — Agent 转移或 spawn 子树起止
+### 2.8 `agent_transfer` — Agent 手递手转移
 
 ```go
 type AgentTransferPayload struct {
-	Phase      TransferPhase `json:"phase"`                  // "start" | "end"
-	FromAgent  string        `json:"from_agent"`             // 来源 Agent 名
-	ToAgent    string        `json:"to_agent"`               // 目标 Agent 名
-	Reason     string        `json:"reason,omitempty"`       // 转移原因（仅 transfer 模式）
-	ChildRunID string        `json:"child_run_id,omitempty"` // 子运行 ID（仅 spawn 模式）
-	Depth      int           `json:"depth,omitempty"`        // 子树深度（仅 spawn 模式）
-	OK         bool          `json:"ok,omitempty"`            // 是否成功（仅 spawn 模式 end）
+	Phase     TransferPhase `json:"phase"`               // "start" | "end"
+	FromAgent string        `json:"from_agent"`          // 来源 Agent 名
+	ToAgent   string        `json:"to_agent"`            // 目标 Agent 名
+	Reason    string        `json:"reason,omitempty"`    // 转移原因
 }
 ```
 
-**两种使用场景**：
+**语义**：Agent 通过 `transfer_to_*` 工具将会话控制权转移给另一个 Agent。
 
-1. **Transfer（手递手）**：`Phase=start`、`FromAgent`、`ToAgent`、`Reason`。`Depth` 为 0。
-   - 发射于 Runner 的 `runTransferLoop` 中，Agent A 转交到 Agent B 时
-2. **Spawn（子树）**：`Phase=start/end`、`FromAgent`、`ToAgent`、`ChildRunID`、`Depth>0`。
-   - 发射于 DefaultSpawner 的事件循环中（通过 `SpawnSpec.OutputCh` 转发）
-   - `Phase=start` 表示子 Agent 启动
-   - `Phase=end` 表示子 Agent 结束，`OK` 表示成功/失败
+- `Phase=start`：当前 Agent 交出控制权，即将切换到目标 Agent
+- `Phase=end`：目标 Agent 完成，控制权回到 Runner（实际未发射 end 事件，以目标 Agent 的 `query_end` 为转移结束标志）
 
-**调用方区分方式**：
-
-```javascript
-if (data.depth > 0) {
-    // spawn 子树事件
-    if (data.phase === 'start') { /* 子 Agent 启动 */ }
-    else { /* 子 Agent 结束 */ }
-} else {
-    // transfer 事件
-}
-```
+**发射时机**：Runner 的 `runTransferLoop` 中，在 `RunLoop` 返回 `InterceptedCall` 后立即发射。
 
 ***
 
-### 2.9 `var_change` — 变量变更
+### 2.9 `spawn_start` — 子 Agent 启动
+
+```go
+type SpawnStartPayload struct {
+	ChildRunID  string `json:"child_run_id"`
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	AgentRole   string `json:"agent_role"`
+	Depth       int    `json:"depth"`
+	TaskSummary string `json:"task_summary,omitempty"`
+}
+```
+
+**语义**：父 Agent 通过 `spawn_subagent` 工具创建了一个子 Agent，子 RunLoop 已启动。
+
+**字段说明**：
+- `ChildRunID`：子运行的唯一标识
+- `ParentRunID`：父运行的 RunID
+- `AgentRole`：子 Agent 的角色名
+- `Depth`：子节点从根起算的深度（根为 0，第一层 spawn 为 1）
+- `TaskSummary`：交给子 Agent 的任务描述（截断至 200 字符）
+
+**发射时机**：`DefaultSpawner.Spawn()` 事件循环中，收到子 Agent 的 `EventStart` 后通过 `SpawnSpec.OutputCh` 非阻塞转发。
+
+***
+
+### 2.10 `spawn_end` — 子 Agent 结束
+
+```go
+type SpawnEndPayload struct {
+	ChildRunID   string              `json:"child_run_id"`
+	ParentRunID  string              `json:"parent_run_id,omitempty"`
+	AgentRole    string              `json:"agent_role"`
+	Depth        int                 `json:"depth"`
+	OK           bool                `json:"ok"`
+	Status       string              `json:"status"`
+	ErrorCode    string              `json:"error_code,omitempty"`
+	FinalTextLen int                 `json:"final_text_len,omitempty"`
+	Metrics      *outcome.RunMetrics `json:"metrics,omitempty"`
+}
+```
+
+**语义**：子 Agent 运行结束（正常完成、失败或父级取消）。
+
+**字段说明**：
+- `ChildRunID` / `ParentRunID` / `AgentRole` / `Depth`：同 `spawn_start`
+- `OK`：子 Agent 是否正常完成（`Termination == completed`）
+- `Status`：状态字符串（`completed` / `failed` / `rejected`）
+- `ErrorCode`：失败时的错误码（如 `parent_cancelled`）
+- `FinalTextLen`：子 Agent 最终回答的字符长度（不含完整文本，避免大文本驻留事件通道）
+- `Metrics`：子 Agent 的 token 消耗指标（InputTokens / OutputTokens / TotalTokens / Steps / TotalCostUSD），父 Agent 最终 `query_end` 的 `Metrics` 已累加子树消耗
+
+**发射时机**：`DefaultSpawner.Spawn()` 事件循环中，收到子 Agent 的 `EventQueryEnd` 后通过 `SpawnSpec.OutputCh` 非阻塞转发。若父级取消导致子未正常结束，同样发射 `spawn_end` 但 `OK=false`、`ErrorCode=parent_cancelled`。
+
+***
+
+### 2.11 `var_change` — 变量变更
 
 ```go
 type VarChangePayload struct {
@@ -263,7 +303,7 @@ type VarChangePayload struct {
 
 ***
 
-### 2.10 `query_end` — 本轮执行结束
+### 2.12 `query_end` — 本轮执行结束
 
 ```go
 type QueryEndPayload struct {
@@ -313,7 +353,7 @@ Transfer 模式下，Metrics 为所有 Agent hop 的累积值。
 
 ***
 
-### 2.11 `error` — 运行时错误
+### 2.13 `error` — 运行时错误
 
 ```go
 type ErrorPayload struct {
@@ -348,8 +388,9 @@ start → question → call_llm_start → answer(Δ) × N → call_llm_end(tool_
 ```
 start → question → call_llm_start → call_llm_end(tool_calls)
     → tool_call_start(name=spawn_subagent)
-    → agent_transfer(phase=start, depth=1)    ← spawn 子启动
-    → agent_transfer(phase=end, depth=1, ok)  ← spawn 子结束
+    → spawn_start(depth=1)                                    ← spawn 子启动
+    → ...（子 Agent 内部事件不转发到父事件流）
+    → spawn_end(depth=1, ok)                                  ← spawn 子结束
     → tool_call_end
     → call_llm_start → answer(Δ) × N → call_llm_end(stop)
     → query_end(completed)
@@ -390,7 +431,8 @@ error(code=invalid_config, message=...) → query_end(termination=error)
 | `call_llm_start` ↔ `call_llm_end`                           | 一次 LLM 调用，必有 1:1 配对                            |
 | `tool_call_start` ↔ `tool_call_end`                         | 一个工具调用，必有 1:1 配对                               |
 | `start` ↔ `query_end`                                       | 一个 Run，可能有 0 或 1 对（transfer 模式子 Agent 无 start） |
-| `agent_transfer(phase=start)` ↔ `agent_transfer(phase=end)` | 一个 transfer 或 spawn，1:1 配对                     |
+| `agent_transfer(phase=start)` ↔ `agent_transfer(phase=end)` | 一个 transfer 配对                                          |
+| `spawn_start` ↔ `spawn_end`                                 | 一个 spawn 配对                                             |
 
 ***
 
@@ -510,7 +552,7 @@ data: {"type":"answer","step":0,"data":{"delta":"Hello","is_reasoning":false}}
 | `pkg/agent/loop.go`              | RunLoop 中各事件的发射时机                                           |
 | `pkg/agent/stream.go`            | consumeStream 中 answer 事件的发射与 IsFinal 语义                    |
 | `pkg/runner/runner.go`           | transfer 模式下 agent\_transfer 事件的发射                          |
-| `pkg/agent/spawn.go`             | spawn 子树 agent\_transfer 事件的发射（通过 OutputCh）                 |
+| `pkg/agent/spawn.go`             | spawn 子树 `spawn_start` / `spawn_end` 事件的发射（通过 OutputCh） |
 | `test-server/main.go`            | runtimeEventToSSE 序列化函数                                     |
 
 ***

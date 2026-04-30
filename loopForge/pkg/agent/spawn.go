@@ -141,17 +141,21 @@ eventLoop:
 
 			// 将子 Agent 启动事件转发到父事件流（可观测性增强，不破坏上下文隔离）
 			if se := ev.Start(); se != nil && spec.OutputCh != nil {
+				taskSummary := spec.Task
+				if len(taskSummary) > 200 {
+					taskSummary = taskSummary[:200] + "..."
+				}
 				select {
 				case spec.OutputCh <- &event.RuntimeEvent{
-					Type:  event.EventAgentTransfer,
+					Type:  event.EventSpawnStart,
 					RunID: parent.RunID,
 					Step:  0,
-					Payload: &event.AgentTransferPayload{
-						Phase:      event.TransferStart,
-						FromAgent:  parent.AgentRole,
-						ToAgent:    childTmpl.Name,
-						ChildRunID: childRef.RunID,
-						Depth:      childRef.Depth,
+					Payload: &event.SpawnStartPayload{
+						ChildRunID:  childRef.RunID,
+						ParentRunID: parent.RunID,
+						AgentRole:   childTmpl.Name,
+						Depth:       childRef.Depth,
+						TaskSummary: taskSummary,
 					},
 				}:
 				default:
@@ -165,18 +169,24 @@ eventLoop:
 				// 将子 Agent 结束事件转发到父事件流
 				if spec.OutputCh != nil {
 					childOK := last != nil && last.Termination == outcome.TerminationCompleted
+					spawnStatus := exchange.SpawnFailed
+					if childOK {
+						spawnStatus = exchange.SpawnCompleted
+					}
 					select {
 					case spec.OutputCh <- &event.RuntimeEvent{
-						Type:  event.EventAgentTransfer,
+						Type:  event.EventSpawnEnd,
 						RunID: parent.RunID,
 						Step:  0,
-						Payload: &event.AgentTransferPayload{
-							Phase:      event.TransferEnd,
-							FromAgent:  parent.AgentRole,
-							ToAgent:    childTmpl.Name,
-							ChildRunID: childRef.RunID,
-							Depth:      childRef.Depth,
-							OK:         childOK,
+						Payload: &event.SpawnEndPayload{
+							ChildRunID:   childRef.RunID,
+							ParentRunID:  parent.RunID,
+							AgentRole:    childTmpl.Name,
+							Depth:        childRef.Depth,
+							OK:           childOK,
+							Status:       string(spawnStatus),
+							FinalTextLen: len(last.FinalText),
+							Metrics:      &last.Metrics,
 						},
 					}:
 					default:
@@ -214,16 +224,17 @@ eventLoop:
 	if last == nil && spec.OutputCh != nil {
 		select {
 		case spec.OutputCh <- &event.RuntimeEvent{
-			Type:  event.EventAgentTransfer,
+			Type:  event.EventSpawnEnd,
 			RunID: parent.RunID,
 			Step:  0,
-			Payload: &event.AgentTransferPayload{
-				Phase:      event.TransferEnd,
-				FromAgent:  parent.AgentRole,
-				ToAgent:    childTmpl.Name,
-				ChildRunID: childRef.RunID,
-				Depth:      childRef.Depth,
-				OK:         false,
+			Payload: &event.SpawnEndPayload{
+				ChildRunID:  childRef.RunID,
+				ParentRunID: parent.RunID,
+				AgentRole:   childTmpl.Name,
+				Depth:       childRef.Depth,
+				OK:          false,
+				Status:      string(exchange.SpawnFailed),
+				ErrorCode:   "parent_cancelled",
 			},
 		}:
 		default:

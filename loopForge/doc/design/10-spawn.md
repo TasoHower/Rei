@@ -33,7 +33,7 @@ Spawn 是**动态创建子 Agent 执行隔离任务**的机制。父 Agent 在 L
 | 执行模型  | **并行/异步**——子 Agent 在后台 goroutine              | **串行**——Agent A 完成后 Agent B 接管         |
 | 对话上下文 | 子 Agent **完全隔离**（仅接收 task + system\_addendum） | Agent B 继承 Agent A 完整消息历史              |
 | 结果处理  | 子结果 JSON 回注到父对话 → 父 LLM 总结                    | Agent B 直接输出最终回答                       |
-| 事件标记  | `agent_transfer(phase=start/end, depth>0)`    | `agent_transfer(phase=start, depth=0)` |
+| 事件标记  | `spawn_start / spawn_end`    | `agent_transfer(phase=start, depth=0)` |
 | 工具    | `spawn_subagent`                              | `transfer_to_*`                        |
 
 ***
@@ -140,8 +140,8 @@ DefaultSpawner.Spawn(ctx, parent, spec)
   │
   ├── 6. 本地事件循环（消费所有子事件）：
   │     for ev := range ch:
-  │       ├── EventStart → spec.OutputCh(非阻塞转发 agent_transfer start)  ← v0.9.4 新增
-  │       ├── EventQueryEnd → 提取 last.Outcome → spec.OutputCh(转发 agent_transfer end)
+  │       ├── EventStart → spec.OutputCh(非阻塞转发 spawn_start)  ← v0.9.8 新增
+  │       ├── EventQueryEnd → 提取 last.Outcome → spec.OutputCh(转发 spawn_end)
   │       ├── EventToolCallStart → 记录 pendingTC
   │       ├── EventToolCallEnd → 追加 ChildToolCall
   │       ├── EventAnswer / CallLLM* → 丢弃（隔离规则）
@@ -154,8 +154,8 @@ DefaultSpawner.Spawn(ctx, parent, spec)
 
 | 子事件                      | 转发到父端                                 | 说明                          |
 | ------------------------ | ------------------------------------- | --------------------------- |
-| `EventStart`             | ✅ → `agent_transfer(TransferStart)`   | 通过 `SpawnSpec.OutputCh` 非阻塞 |
-| `EventQueryEnd`          | ✅ → `agent_transfer(TransferEnd, OK)` | 同上                          |
+| `EventStart`             | ✅ → `spawn_start`                    | 通过 `SpawnSpec.OutputCh` 非阻塞 |
+| `EventQueryEnd`          | ✅ → `spawn_end(OK)`                 | 同上                          |
 | `EventAnswer`            | 🚫 丢弃                                 | ReAct 中间文本隔离                |
 | `EventCallLLMStart/End`  | 🚫 丢弃                                 | 子模型调用隔离                     |
 | `EventToolCallStart/End` | 🚫 仅本地记录                              | 聚合进 `ChildToolCalls`        |
@@ -337,9 +337,9 @@ type SpawnHandle struct {
         │     ├── 构造子 Agent（Clone + system_addendum + 非流式）
         │     ├── go childTmpl.RunLoop(localCh)
         │     └── 本地事件循环：
-        │           EventStart → OutputCh(agent_transfer start)  ← v0.9.4
+        │           EventStart → OutputCh(spawn_start)
         │           tool_call_start/end → 记录 ChildToolCalls
-        │           QueryEnd → 提取 Outcome → OutputCh(agent_transfer end)
+        │           QueryEnd → 提取 Outcome → OutputCh(spawn_end)
         │           answer/call_llm → 丢弃
         │
         └── engineSpawner.Spawn():
@@ -383,7 +383,7 @@ type SpawnHandle struct {
 | [01-agent-core.md](01-agent-core.md) §5 | RunLoop 中 `executeToolCalls` 如何调用 spawn\_subagent |
 | [04-tools.md](04-tools.md) §2.3         | `spawn_subagent` 作为注入工具                           |
 | [07-transfer.md](07-transfer.md) §1.2   | Spawn vs Transfer 对比                              |
-| [03-events.md](03-events.md) §2.8       | `agent_transfer` 事件在 spawn 场景的载荷                  |
+| [03-events.md](03-events.md) §2.9–2.10 | `spawn_start` / `spawn_end` 事件载荷 |
 
 ***
 
