@@ -564,8 +564,8 @@ data: {"type":"answer","step":0,"data":{"delta":"Hello","is_reasoning":false}}
 | [01-agent-core.md](01-agent-core.md) §5     | RunLoop 迭代步骤——事件发射的源头  |
 | [02-runner-core.md](02-runner-core.md) §7 | Transfer 模式下的事件流差异 |
 | [00-abstractions.md](00-abstractions.md) §8 | RuntimeEvent 的代码级定义    |
-| `doc/design/data-fusion.md`（待修订） | 事件类型与现网 runner 的类型语义对齐 |
-| `doc/design/spawn-runtime-rules.md`（待修订） | spawn 子 Agent 的事件隔离规则 |
+| `doc/design/data-fusion.md` | 事件类型与现网 runner 的类型语义对齐 |
+| `doc/design/spawn-runtime-rules.md` | spawn 子 Agent 的事件隔离规则（§1 动态隔离 / §7 React 聚合） |
 
 ***
 

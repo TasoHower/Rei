@@ -285,8 +285,8 @@ func (s *DefaultSpawner) Spawn(ctx context.Context, parent exchange.RunRef, spec
 
 | 子事件 | 转发到父端 | 说明 |
 |--------|-----------|------|
-| `EventStart` | ✅ → `agent_transfer(TransferStart)` | 通过 `SpawnSpec.OutputCh` 非阻塞 |
-| `EventQueryEnd` | ✅ → `agent_transfer(TransferEnd)` | 同上 |
+| `EventStart` | ✅ → `spawn_start` | 通过 `SpawnSpec.OutputCh` 非阻塞 |
+| `EventQueryEnd` | ✅ → `spawn_end` | 同上 |
 | `EventAnswer` | 🚫 丢弃 | ReAct 中间文本隔离 |
 | `EventCallLLMStart/End` | 🚫 丢弃 | 子模型调用隔离 |
 | `EventToolCallStart/End` | 🚫 仅本地记录 | 聚合进 `ChildToolCalls` |

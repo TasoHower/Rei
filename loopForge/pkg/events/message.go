@@ -1,6 +1,8 @@
 package events
 
 // EventMessage is the outbound envelope aligned with multi-agent-server runner event shape.
+// Event type constants are aligned with loopForge runtime event (pkg/runtime/event) as the
+// authoritative source. See doc/design/data-fusion.md for the alignment map.
 type EventMessage struct {
 	Code     string                `json:"code"`
 	Data     *EventMessageData     `json:"data,omitempty"`
@@ -27,6 +29,7 @@ type EventMessageMetaData struct {
 }
 
 // EventMessageType enumerates semantic event kinds for UI and observability.
+// Values are aligned 1:1 with pkg/runtime/event EventMessageType.
 type EventMessageType string
 
 const (
@@ -37,9 +40,10 @@ const (
 	EventMessageTypeToolCallEnd   EventMessageType = "tool_call_end"
 	EventMessageTypeCallLLMStart  EventMessageType = "call_llm_start"
 	EventMessageTypeCallLLMEnd    EventMessageType = "call_llm_end"
-	EventMessageTypeCallRAGStart  EventMessageType = "call_rag_start"
-	EventMessageTypeCallRAGEnd    EventMessageType = "call_rag_end"
 	EventMessageTypeAgentTransfer EventMessageType = "agent_transfer"
+	EventMessageTypeSpawnStart    EventMessageType = "spawn_start"
+	EventMessageTypeSpawnEnd      EventMessageType = "spawn_end"
+	EventMessageTypeVarChange     EventMessageType = "var_change"
 	EventMessageTypeQueryEnd      EventMessageType = "query_end"
-	EventMessageTypeWelcome       EventMessageType = "welcome"
+	EventMessageTypeError         EventMessageType = "error"
 )
