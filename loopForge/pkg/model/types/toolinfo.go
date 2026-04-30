@@ -9,7 +9,7 @@ type ToolInfo struct {
 	Handle      ToolCallHandler          `json:"-"`
 }
 
-// ToOpenAITool returns a value suitable for agent-sdk-go Request.Tools ([]interface{} entries).
+// ToOpenAITool returns a value suitable for OpenAI-compatible chat completion API ([]interface{} entries).
 func (t *ToolInfo) ToOpenAITool() map[string]interface{} {
 	if t == nil {
 		return nil

@@ -67,7 +67,7 @@
 | **入口层** | 对外暴露 `Runnable` 接口；装配模型适配与引擎 Spawner | `pkg/runner/` |
 | **引擎层** | 管理运行状态、子树生命周期、预算、child registry | `internal/engine/` |
 | **Agent loop 层** | Agent 定义、RunLoop、DefaultSpawner、工具构建 | `pkg/agent/` |
-| **模型层** | ChatModel 抽象、适配器（agentsdk / deepseek）、ToolInfo schema | `pkg/model/`、`pkg/model/adapters/*` |
+| **模型层** | ChatModel 抽象、适配器（openai / deepseek）、ToolInfo schema | `pkg/model/`、`pkg/model/adapters/*` |
 | **MCP 层** | MCP 客户端、BootstrapToolInfos、cfg 配置 | `pkg/mcp/`、`pkg/mcp/cfg/` |
 | **工具层** | ToolCall 分派与执行 | `pkg/tool/` |
 | **变量层** | 会话级 VarStore、var_set 工具、{{key}} 替换 | `pkg/variable/` |
@@ -624,7 +624,7 @@ type ToolCallingChatModel interface {
 }
 ```
 
-当前适配器实现：`pkg/model/adapters/agentsdk/`（Lark/方舟 SDK）、`pkg/model/adapters/deepseek/`（DeepSeek SDK）。
+当前适配器实现：`pkg/model/adapters/openai/`（OpenAI SDK）、`pkg/model/adapters/deepseek/`（DeepSeek SDK）、`pkg/model/adapters/lark/`（火山方舟/Ark）。
 
 ---
 

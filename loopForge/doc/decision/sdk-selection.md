@@ -1,6 +1,6 @@
 # loopForge：模型内核与编排选型
 
-> **结论**：Multi-Agent **引擎**采用**自实现的原生 Agent loop**（`pkg/agent/loop.go`）。**模型调用**复用 `github.com/agentizen/agent-sdk-go`（仅模型适配层）。**不**采用 Eino Graph 作为本仓库的编排内核。  
+> **结论**：Multi-Agent **引擎**采用**自实现的原生 Agent loop**（`pkg/agent/loop.go`）。**模型调用**在 v0.9.6 之前复用 `github.com/agentizen/agent-sdk-go`（仅模型适配层），v0.9.6 起全量移除，使用 `github.com/openai/openai-go`(OpenAI SDK) 作为兜底适配器。**不**采用 Eino Graph 作为本仓库的编排内核。  
 > **Memory / RAG**：**不**在引擎内实现，由 **MCP**（**SeRagLF** 为其中之一）以 **tools / resources** 提供。  
 > **Skills / spawn**：**Skills** 为引擎侧可装载指令包；**动态子 Agent（spawn）** 由引擎在 **同一套 runner** 上创建短时子 `Run`（Claude Code 式子任务），**不**用 Graph 编排实现。
 
@@ -8,16 +8,16 @@
 
 | 名称 | 指向 | 说明 |
 |------|------|------|
-| **agent-sdk-go** | `github.com/agentizen/agent-sdk-go` v0.17.0（`go.mod`） | 仅作为**模型适配层**使用：`pkg/model` 封装其 ChatModel 接口；`pkg/model/adapters/agentsdk/` 含 Lark SDK 适配。**loop 内核和编排不依赖 agent-sdk-go**。 |
+| **agent-sdk-go** | `github.com/agentizen/agent-sdk-go` v0.17.0（`go.mod`，v0.9.6 已完全移除） | 曾作为**模型适配层**：`pkg/model` 封装其 ChatModel 接口；`pkg/model/adapters/agentsdk/` 提供 SDK 适配。**v0.9.6 已全量移除，由 `github.com/openai/openai-go`(OpenAI SDK) 替代**。 |
 | **internal/engine** | `loopForge/internal/engine/`（12 文件） | **引擎核心层**：`RunState`、`SpawnHandle`、`ChildRegistry`、`BudgetCounter`、`engineSpawner`。管理全局运行状态与 spawn 生命周期。 |
 | **pkg/agent** | `loopForge/pkg/agent/` | **自实现 Agent loop 层**：`Agent` 定义、`RunLoop`（[loop.go](file:///Users/admin/Documents/hower/rei/loopForge/pkg/agent/loop.go)）、`DefaultSpawner`（[spawn.go](file:///Users/admin/Documents/hower/rei/loopForge/pkg/agent/spawn.go)）。纯净 loop，不关心外部状态。 |
 | **pkg/runner** | `loopForge/pkg/runner/` | **入口装配层**：`Runner.Run()` 对外暴露 `Runnable` 接口；夹接 agent-sdk-go 模型适配；注入 `engineSpawner` 包装。 |
 | **SeRagLF** | workspace 内项目 | MCP Server；领域内 **Self-RAG、记忆、向量检索** 在其进程内（**Eino Graph** 编排） |
 | **loopForge** | 本仓库 | Multi-Agent **引擎**：自实现 Agent loop + `internal/engine` + **spawn**；**SkillLoader**；**多 MCP** |
 
-## 2. 为何选 agent-sdk-go 做「模型适配层」
+## 2. 为何曾选 agent-sdk-go 做「模型适配层」（v0.9.6 前）
 
-agent-sdk-go 在 v0.1.0 初期曾被考虑作为 loop 内核，但在演进过程中发现自实现 loop 可获得更灵活的编排控制。当前 agent-sdk-go 仅用于**模型调用适配**：
+agent-sdk-go 在 v0.1.0 初期曾被考虑作为 loop 内核，但在演进过程中发现自实现 loop 可获得更灵活的编排控制。在 v0.1.0~v0.9.5 期间，agent-sdk-go 仅用于**模型调用适配**：
 
 - **模型适配**：`pkg/model` 封装其 `ChatModel` 接口；`pkg/model/adapters/agentsdk/` 提供 Lark/方舟 SDK 的 ChatModel 转换。
 - **工具协议**：`pkg/tool` 的 `ToolCallHandler` 模式参考了其设计，但 loopForge 有自实现的工具分派链（`pkg/tool/dispatch.go`）。
@@ -30,6 +30,16 @@ agent-sdk-go 在 v0.1.0 初期曾被考虑作为 loop 内核，但在演进过�
 3. **Agent + MCP 深度绑定**：自实现支持每次 `RunLoop` 调用按需 `BootstrapToolInfos`、`ValidateBindings`、`SystemPromptBuilder` 管线，不需要外部 orchestrator 介入。
 
 **loopForge 自研重点**：`LoopPolicy`、`RunState`（`internal/engine/`）、工具注册表（**多 MCP**、**spawn 内置工具**）、`SkillLoader`、**Spawner**（深度/并发/预算）、OTel + metrics + **含子 Run 的** cost 汇总——**不含**向量库与 RAG 管线。
+
+### 2.1 v0.9.6：全量移除 agent-sdk-go
+
+v0.9.6 完成了以下变更：
+
+- **删除** `go.mod` 中 `github.com/agentizen/agent-sdk-go v0.17.0` 依赖
+- **删除** `pkg/model/adapters/agentsdk/` 整个包（4 个文件）
+- **新增** `pkg/model/adapters/openai/` — 基于 `github.com/openai/openai-go` 的 `OpenAIChatModel` 兜底适配器
+- **新增** `pkg/runner/openai_default.go` — `OPENAI_API_KEY` 环境变量自动装配，作为 Lark/DeepSeek 之后的最后兜底
+- **更新** 所有文档中 agent-sdk-go 引用为 OpenAI SDK
 
 ## 3. Eino（SeRagLF 所用）与本引擎的差异：Graph vs Agent loop
 
@@ -49,13 +59,13 @@ agent-sdk-go 在 v0.1.0 初期曾被考虑作为 loop 内核，但在演进过�
 
 ## 5. 备选：完全自研 HTTP 调用 LLM
 
-仅在无法接受 agent-sdk-go 依赖时考虑；代价是重复实现 runner、tool、network 与观测钩子，一般不推荐。
+v0.9.6 之前，此备选仅在无法接受 agent-sdk-go 依赖时考虑。v0.9.6 已移除 agent-sdk-go，使用 `github.com/openai/openai-go`(OpenAI SDK) 作为兜底适配器，同时保留 `volcengine-go-sdk`(Lark/Ark) 和 `deepseek-go`(DeepSeek) 专用适配器。
 
 ## 6. 最终决策（loopForge）
 
 系统拓扑与模块划分见 **`doc/design/architecture.md`**；**RuntimeAction / Tool / MCP** 及 **§2 MVP 最小内核**见 **`doc/design/abstractions.md`**；与现网 runner **`EventMessage` / `EventMessageType` 类型语义对齐**见 **`doc/design/data-fusion.md`**（不含 Push/落库）。交付节奏建议与 **`doc/design/multi-agent-engine.md` §1.4** 一致：**Make it work → Make it right → Make it fast**（先跑通，再正确性/契约，再性能）。
 
-1. **默认 loop 内核**：**自实现** `pkg/agent/loop.go`；模型适配使用 `github.com/agentizen/agent-sdk-go`（版本 `v0.17.0` 固定在 `go.mod`），仅作模型层依赖。
+1. **默认 loop 内核**：**自实现** `pkg/agent/loop.go`；模型适配使用 `github.com/openai/openai-go`（OpenAI SDK）作为通用兜底，以及 `volcengine-go-sdk`（Lark/Ark）和 `deepseek-go`（DeepSeek）专用适配器。
 2. **领域能力**：**MCP Servers**（含 SeRagLF）→ tools/resources → **Agent loop** 内调用。
 3. **Skills**：受信路径加载 `SKILL.md`（或等价清单），注入到指定 Agent；可与子 spawn 绑定。
 4. **spawn**：内置受控工具（`spawn_subagent`）创建子 `Agent` + 子 `Run`，强制 **深度/并发/预算** 上限。
@@ -67,7 +77,7 @@ Eino 使用开源 **Eino Dev**（IDE 插件）+ **`github.com/cloudwego/eino-ext
 
 ## 8. 许可证与维护
 
-依赖许可证审计以各模块 `LICENSE` 为准（agent-sdk-go 一般为 MIT；以仓库文件为准）。
+依赖许可证审计以各模块 `LICENSE` 为准（`openai-go` 一般为 MIT；以仓库文件为准）。
 
 ---
 
@@ -77,3 +87,4 @@ Eino 使用开源 **Eino Dev**（IDE 插件）+ **`github.com/cloudwego/eino-ext
 |------|------|
 | 2026-04-29 | 初稿：loopForge v0.1.0 SDK 选型决策。 |
 | 2026-04-29 | v0.9.5 修订：修正 agent-sdk-go 角色为"模型适配层"，新增 internal/engine/pkg/agent/pkg/runner 术语，更新架构栈描述（移除 pkg/network）。 |
+| 2026-04-30 | v0.9.6 修订：agent-sdk-go 已全量移除，新增 OpenAI SDK 兜底适配器。 |

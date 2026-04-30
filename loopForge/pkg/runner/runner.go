@@ -195,6 +195,7 @@ func (r *Runner) Run(ctx context.Context, req *request.RuntimeRequest) <-chan *e
 			}
 			exec := r.entryAgent.Clone()
 			applyDefaultLarkIfNeeded(exec)
+			applyDefaultOpenAIIfNeeded(exec)
 			if err := r.prepareAgent(ctx, exec); err != nil {
 				emitRunSetupError(ctx, ch, runID, err.Error())
 				return
@@ -266,6 +267,7 @@ func (r *Runner) runTransferLoop(ctx context.Context, req *request.RuntimeReques
 	for {
 		a := current.Clone()
 		applyDefaultLarkIfNeeded(a)
+		applyDefaultOpenAIIfNeeded(a)
 		if err := r.prepareAgent(ctx, a); err != nil {
 			emitError("invalid_config", err.Error())
 			return

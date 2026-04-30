@@ -1,6 +1,6 @@
 # loopForge ChatModel（模型抽象层）
 
-> 本文档描述 loopForge 的 **ChatModel 接口体系**——Agent 与 LLM 之间的抽象层。它定义了 LLM 调用的最小契约（`BaseChatModel` + `ToolCallingChatModel`），以及三个适配器实现（Lark/方舟、DeepSeek、agent-sdk-go）和通用能力（非流式包装、CallOption 配置体系）。
+> 本文档描述 loopForge 的 **ChatModel 接口体系**——Agent 与 LLM 之间的抽象层。它定义了 LLM 调用的最小契约（`BaseChatModel` + `ToolCallingChatModel`），以及三个适配器实现（Lark/方舟、DeepSeek、OpenAI SDK）和通用能力（非流式包装、CallOption 配置体系）。
 >
 > **前置阅读**：[01-agent-core.md](01-agent-core.md)——Agent 通过 `ChatModel` 字段调用 LLM；[10-spawn.md](10-spawn.md)——子 Agent 使用 `WrapNonStream` 强制非流式。
 
@@ -10,7 +10,7 @@
 
 ### 1.1 为什么需要模型抽象层
 
-loopForge 的 Agent 不绑定任何特定 LLM 厂商。`Agent.ChatModel` 字段的类型是 `model.ToolCallingChatModel` 接口——Agent 只调用 `Generate()` 和 `Stream()`，不需要知道背后是火山方舟、DeepSeek、还是 agent-sdk-go 的 Provider。
+loopForge 的 Agent 不绑定任何特定 LLM 厂商。`Agent.ChatModel` 字段的类型是 `model.ToolCallingChatModel` 接口——Agent 只调用 `Generate()` 和 `Stream()`，不需要知道背后是火山方舟、DeepSeek、还是 OpenAI SDK。
 
 ```
 Agent.RunLoop
@@ -23,7 +23,7 @@ Agent.RunLoop
     ┌────┴────────────────────┐
     │                          │
     v                          v
- agent-sdk-go Provider    DeepSeek / Lark HTTP
+ OpenAI SDK    DeepSeek / Lark HTTP
 ```
 
 ### 1.2 包结构
@@ -44,7 +44,7 @@ pkg/model/
 └── adapters/
     ├── lark/                # 火山方舟 (Ark) 适配器
     ├── deepseek/            # DeepSeek API 适配器
-    └── agentsdk/            # agent-sdk-go Provider 适配器
+    └── openai/              # OpenAI SDK 适配器
 ```
 
 `pkg/model` 包暴露的名字通过别名指向 `internal/interface` 和 `internal/types`——调用方只用 `import "loopforge/pkg/model"` 即可拿到全部公开类型。
@@ -246,13 +246,13 @@ func NewDeepSeekChatModel(apiKey, baseURL, modelName string) *DeepSeekChatModel
 - 支持 `ReasoningContent`（`reasoning_content` 字段）的透传——`Message.ReasoningContent` 由 DeepSeek 适配器填充，Agent 的 `consumeStream` 通过 `IsReasoning=true` 的 `answer` 事件发到前端
 - Runner 的 `ApplyDeepSeekFromConfig` 在 `ChatModel == nil` 时自动从环境变量装配
 
-### 5.3 agent-sdk-go
+### 5.3 OpenAI SDK
 
-`pkg/model/adapters/agentsdk/chatmodel.go`：
+`pkg/model/adapters/openai/client.go`：
 
 ```go
-type SDKChatModel struct {
-	provider  sdkmodel.Provider    // agent-sdk-go 的 Provider 抽象
+type OpenAIChatModel struct {
+	client    *openai.Client       // github.com/openai/openai-go
 	modelName string
 	tools     []*lpmodel.ToolInfo
 }
@@ -261,33 +261,38 @@ type SDKChatModel struct {
 构造：
 
 ```go
-func NewSDKChatModel(provider sdkmodel.Provider, modelName string) *SDKChatModel
+func NewOpenAIChatModel(apiKey, baseURL, modelName string) lpmodel.ToolCallingChatModel
 ```
 
 **特点**：
-- 基于 agent-sdk-go 的 `Provider` 接口——更通用，不绑定具体厂商
-- 适合 "Provider 已经在别处配置好" 的场景
-- `settings.go` 提供 `ToSDKGenerateOptions` 转换层（将 loopforge `CallOption` → SDK `GenerateOptions`）
+- 基于官方 `github.com/openai/openai-go` SDK——OpenAI 兼容 API 的事实标准
+- 支持流式和非流式
+- 作为 Lark 和 DeepSeek 之后的**最后兜底**适配器：Runner 的 `applyDefaultOpenAIIfNeeded` 在 Lark 装配之后、若 `OPENAI_API_KEY` 存在则自动装配
+- 环境变量：`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`
+
+> **v0.9.6 变更**：此适配器替代了之前基于 `github.com/agentizen/agent-sdk-go` 的 `SDKChatModel`（`agentsdk` 包），该包已被整体移除。
 
 ### 5.4 适配器对比
 
-| 维度 | Lark | DeepSeek | agent-sdk-go |
+| 维度 | Lark | DeepSeek | OpenAI SDK |
 |------|------|----------|-------------|
-| 底层 SDK | `volcengine-go-sdk` | `deepseek-go` | `agent-sdk-go` Provider |
-| ReasoningContent | 不支持 | ✅ 支持 | 取决于 Provider |
-| 构造 API | `NewLarkChatModel(key, url, name)` | `NewDeepSeekChatModel(key, url, name)` | `NewSDKChatModel(provider, name)` |
-| 环境变量装配 | `LARK_API_KEY` 等 | `DEEPSEEK_API_KEY` 等 | —（需手动） |
+| 底层 SDK | `volcengine-go-sdk` | `deepseek-go` | `openai-go` |
+| ReasoningContent | 不支持 | ✅ 支持 | 不支持 |
+| 构造 API | `NewLarkChatModel(key, url, name)` | `NewDeepSeekChatModel(key, url, name)` | `NewOpenAIChatModel(key, url, name)` |
+| 环境变量装配 | `LARK_API_KEY` 等 | `DEEPSEEK_API_KEY` 等 | `OPENAI_API_KEY` |
 
-### 5.5 agent-sdk-go 的未来
+### 5.5 agent-sdk-go 已移除
 
-agent-sdk-go（`github.com/agentizen/agent-sdk-go` v0.17.0）是 loopForge v0.1.0 初期引入的依赖，在早期版本中曾被用作模型调用层。当前它仅在 `pkg/model/adapters/agentsdk/` 中作为 **SDKChatModel** 适配器存在——Agent 的核心 loop、工具执行、spawn、transfer 等全部走自实现路径，对 agent-sdk-go 无任何依赖。
+agent-sdk-go（`github.com/agentizen/agent-sdk-go` v0.17.0）是 loopForge v0.1.0 初期引入的依赖，在早期版本中曾被用作模型调用层。在 v0.9.6 中已完成全量移除：
 
-**将在未来的版本中彻底移除 agent-sdk-go**。删除范围包括：
-- `pkg/model/adapters/agentsdk/` 整个包
-- `go.mod` 中的 `github.com/agentizen/agent-sdk-go` 依赖
-- 所有文档中对该库的引用
+- `pkg/model/adapters/agentsdk/` 整个包已删除
+- `go.mod` 中 `github.com/agentizen/agent-sdk-go` 依赖已移除
+- 模型兜底能力由 `github.com/openai/openai-go`（OpenAI SDK）替代
 
-移除后 loopForge 的模型适配完全由 Lark（火山方舟/Ark）和 DeepSeek 两个适配器承担。
+移除后 loopForge 的模型适配由以下三个适配器承担：
+- **Lark（火山方舟/Ark）** — 基于 `volcengine-go-sdk`
+- **DeepSeek** — 基于 `deepseek-go`
+- **OpenAI SDK** — 基于 `openai-go`（通用兜底）
 
 ### 5.6 自定义 ChatModel
 
@@ -367,6 +372,16 @@ Runner 在 `Run()` 中调用 `applyDefaultLarkIfNeeded(a)`——若 Agent 的 `C
 
 `LARK_MODEL` > `ARK_MODEL` > `DOUBAO_MODEL`（取第一个非空，空则默认 `deepseek-v3-2-251201`）
 
+### 7.3 OpenAI 兜底
+
+`OPENAI_API_KEY`（必填，无则不装配）
+
+`OPENAI_BASE_URL`（空则默认 `https://api.openai.com/v1`）
+
+`OPENAI_MODEL`（空则默认 `gpt-4o-mini`）
+
+OpenAI 装配在 Lark 和 DeepSeek 之后执行，作为最后兜底。即：优先专用适配器 → 最后回退到 OpenAI SDK 通用适配器。
+
 ### 7.2 DeepSeek 优先级
 
 `DEEPSEEK_API_KEY`（必填，无则不装配）
@@ -419,9 +434,10 @@ Runner.Run()
 | `pkg/model/nonstream.go` | WrapNonStream（Spawn 非流式包装） |
 | `pkg/model/adapters/lark/client.go` | LarkChatModel（火山方舟/Ark） |
 | `pkg/model/adapters/deepseek/client.go` | DeepSeekChatModel（DeepSeek API） |
-| `pkg/model/adapters/agentsdk/chatmodel.go` | SDKChatModel（agent-sdk-go Provider） |
+| `pkg/model/adapters/openai/client.go` | OpenAIChatModel（OpenAI SDK） |
 | `pkg/runner/lark_default.go` | applyDefaultLarkIfNeeded（环境变量自动装配） |
 | `pkg/runner/deepseek_default.go` | ApplyDeepSeekFromConfig（环境变量自动装配） |
+| `pkg/runner/openai_default.go` | applyDefaultOpenAIIfNeeded（环境变量自动装配，最后兜底） |
 
 ---
 
@@ -440,3 +456,4 @@ Runner.Run()
 | 日期 | 版本 | 变更说明 |
 |------|------|----------|
 | 2026-04-30 | v0.9.5 | 初稿：ChatModel 接口体系、CallOption 配置、三个适配器对比、WrapNonStream、环境变量装配。 |
+| 2026-04-30 | v0.9.6 | 移除 agent-sdk-go 适配器，新增 OpenAI SDK 适配器（`pkg/model/adapters/openai/`）。 |
