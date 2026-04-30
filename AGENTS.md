@@ -72,3 +72,37 @@
 - `.cursor/rules/README.md` — 规则目录说明
 - `loopForge/doc/plan/plan-v0.8.0.md` — v0.8.0 实施计划（spawn）
 - `loopForge/doc/log/progress-v0.7.0.md` — 版本计划参考体例
+
+---
+
+## 工作反思记录
+
+### v0.9.7 反思（2026-04-30）
+
+> 版本主题：tools 自动化注册 — 基于 struct 反射自动生成 JSON Schema
+
+#### 做得好的
+
+| 实践 | 说明 |
+|------|------|
+| **Plan 迭代** | 用户两次提出修改意见（Parameters 废弃兼容 + 兼容性分析），均在 plan 文件中更新后经确认再编码 |
+| **兼容性分析先行** | 编码前逐工具对比反射生成的 Parameters 与原始手动定义，发现 4 类 10 项差异，避免了上线后行为偏离 |
+| **测试覆盖全面** | 17 个测试覆盖所有类型映射边界，包括循环引用保护、`json:"-"` 隐藏字段、`map[string]interface{}` 无 additionalProperties 等边缘场景 |
+| **逐作业实施** | 核心包 → 4 工具重构 → 文档 → 测试 → 验证，顺序合理且每步编译通过 |
+
+#### 待改进
+
+| 问题 | 影响 | 改进建议 |
+|------|------|---------|
+| **Step 4 验收文档未生成** | 流程中提到 `doc/acceptance/` 但本次未创建验收文档 | Step 4 目前可由最终验证替代，但应明确是否有 minial acceptance 要求；建议在 workflow 中增加"是否需验收文档"的判断节点 |
+| **stray 依赖未清理** | `test-server/go.mod`/`go.sum` 有 v0.9.6 遗留的 `openai-go` 间接依赖未提交 | 每次 commit 前运行 `git status` 检查未预期的文件变更；非本次改动的文件应单独评估是否需一并提交 |
+| **提交信息含特殊字符时 Shell 中断** | multi-line commit message 中含 `\"` 导致命令执行失败 | 使用 `git commit -F` 从临时文件读取提交信息，或使用 heredoc 避免 shell 引号转义问题 |
+| **反射特殊分支未在 plan 中预先识别** | `map[string]interface{}` 与 `map[string]json.RawMessage` 的行为差异在实现时才被确认 | 对涉及反射的变更，plan 中应包含一份"已知的特殊类型/边缘行为清单"以减少实施时的意外发现 |
+
+#### Git 流程记录
+
+```
+commit 7e904f0 (tag: v0.9.7)
+14 files, +1663 / -263 lines
+流程: Plan → 编码(8 subtasks) → 测试(17 tests) → 文档 → commit → tag → push
+```
