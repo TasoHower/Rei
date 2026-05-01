@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	lpmodel "loopforge/pkg/model"
+	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
 
 	dspk "github.com/cohesion-org/deepseek-go"
 )

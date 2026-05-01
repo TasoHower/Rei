@@ -8,9 +8,9 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"loopforge/pkg/mcp/cfg"
-	"loopforge/pkg/model"
-	applog "loopforge/pkg/log"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	applog "github.com/TasoHower/rei/loopForge/pkg/log"
 )
 
 // BootstrapToolInfos connects to each MCP profile, runs tools/list, maps tools to model ToolInfo

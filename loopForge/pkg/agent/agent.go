@@ -5,15 +5,15 @@ import (
 	"sync"
 	"time"
 
-	"loopforge/pkg/mcp/cfg"
-	"loopforge/pkg/model"
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/exchange"
-	"loopforge/pkg/runtime/outcome"
-	"loopforge/pkg/runtime/request"
-	"loopforge/pkg/skill"
-	"loopforge/pkg/tool"
-	"loopforge/pkg/variable"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/skill"
+	"github.com/TasoHower/rei/loopForge/pkg/tool"
+	"github.com/TasoHower/rei/loopForge/pkg/variable"
 )
 
 // ToolInterceptor, when set on an Agent, is called before executing each

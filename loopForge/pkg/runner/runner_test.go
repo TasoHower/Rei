@@ -8,10 +8,10 @@ import (
 	"sync"
 	"testing"
 
-	"loopforge/pkg/agent"
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/outcome"
-	"loopforge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/agent"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
 )
 
 func TestRunner_Transfer_ParallelToolCalls_AllSyntheticToolMessages(t *testing.T) {

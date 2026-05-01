@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"loopforge/pkg/model"
-	"loopforge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
 )
 
 // streamResult holds the accumulated output from consuming an LLM response stream.

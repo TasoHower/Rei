@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"loopforge/pkg/skill"
+	"github.com/TasoHower/rei/loopForge/pkg/skill"
 )
 
 var (

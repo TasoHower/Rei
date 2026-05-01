@@ -8,7 +8,7 @@ import (
 	"sort"
 	"sync"
 
-	lferrors "loopforge/pkg/errors"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
 )
 
 // VarEntry is one variable slot with metadata.

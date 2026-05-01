@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"loopforge/pkg/agent"
+	"github.com/TasoHower/rei/loopForge/pkg/agent"
 )
 
 // Engine executes user-facing runs and owns orchestration boundaries.

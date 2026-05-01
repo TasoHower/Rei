@@ -4,8 +4,8 @@ import (
 	"os"
 	"strings"
 
-	"loopforge/pkg/agent"
-	openaiadapter "loopforge/pkg/model/adapters/openai"
+	"github.com/TasoHower/rei/loopForge/pkg/agent"
+	openaiadapter "github.com/TasoHower/rei/loopForge/pkg/model/adapters/openai"
 )
 
 func ApplyOpenAIFromConfig(a *agent.Agent, apiKey, baseURL, modelFallback string) {

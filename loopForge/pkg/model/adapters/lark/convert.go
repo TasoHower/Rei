@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	lferrors "loopforge/pkg/errors"
-	lpmodel "loopforge/pkg/model"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
+	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
 
 	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )

@@ -95,7 +95,7 @@ func (r *SkillRegistry) LoadFromPaths(ctx context.Context, paths []string) error
 		return nil
 	}
 
-	tracer := otel.Tracer("loopforge/skill")
+	tracer := otel.Tracer("github.com/TasoHower/rei/loopForge/skill")
 	ctx, span := tracer.Start(ctx, "skill.registry.load",
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)

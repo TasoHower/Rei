@@ -1,7 +1,7 @@
 package mcp
 
 import (
-	"loopforge/pkg/model/types"
+	"github.com/TasoHower/rei/loopForge/pkg/model/types"
 )
 
 // ToToolInfo builds model.ToolInfo from mapped parts. ExposedName comes from Mapped.ExposedName;

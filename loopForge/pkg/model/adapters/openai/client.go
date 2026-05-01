@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	lpmodel "loopforge/pkg/model"
+	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"

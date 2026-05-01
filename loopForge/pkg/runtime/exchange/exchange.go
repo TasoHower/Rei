@@ -3,9 +3,9 @@ package exchange
 import (
 	"time"
 
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/outcome"
-	"loopforge/pkg/runtime/tool"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/tool"
 )
 
 // Lifecycle 子运行（child run）的生命周期模式。当前仅实现 [LifecycleEphemeral]；

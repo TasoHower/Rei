@@ -1,8 +1,8 @@
 package engine
 
 import (
-	"loopforge/internal/defaults"
-	"loopforge/pkg/runtime/budget"
+	"github.com/TasoHower/rei/loopForge/internal/defaults"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/budget"
 )
 
 // defaultLoopPolicy implements LoopPolicy with configurable limits.

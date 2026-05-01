@@ -1,6 +1,6 @@
 package engine
 
-import "loopforge/pkg/agent"
+import "github.com/TasoHower/rei/loopForge/pkg/agent"
 
 // Planner emits the next conceptual loop action (see pkg/agent).
 type Planner = agent.Planner

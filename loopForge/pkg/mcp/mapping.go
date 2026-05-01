@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"loopforge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
 )
 
 // ExposedToolName is the model-visible tool name: ToolPrefix + MCP protocol tool name.

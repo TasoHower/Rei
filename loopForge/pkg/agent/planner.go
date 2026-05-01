@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 
-	"loopforge/pkg/runtime/action"
-	"loopforge/pkg/runtime/exchange"
-	"loopforge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/action"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
 )
 
 // Planner emits the next conceptual loop action, often backed by LLM tool routing

@@ -1,6 +1,6 @@
 package event
 
-import "loopforge/pkg/runtime/outcome"
+import "github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
 
 // EventMessageType identifies outbound streaming chunks to the client.
 // Values are aligned with multi-agent-server EventMessageType (see doc/design/data-fusion.md §3).

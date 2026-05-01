@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 
-	"loopforge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
 )
 
 // RuntimeEventSink receives streaming runtime events (SSE, logs, dev UI).

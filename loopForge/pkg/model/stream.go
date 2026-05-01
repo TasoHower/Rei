@@ -1,6 +1,6 @@
 package model
 
-import "loopforge/pkg/model/types"
+import "github.com/TasoHower/rei/loopForge/pkg/model/types"
 
 type MessageStreamReader = types.MessageStreamReader
 

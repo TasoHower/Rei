@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
 )
 
 // Runnable is the minimal runnable agent contract (abstractions.md section 2.4).

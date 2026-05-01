@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"loopforge/pkg/mcp/cfg"
-	lferrors "loopforge/pkg/errors"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
 )
 
 // SeraglfDockerURL is the streamable HTTP MCP endpoint for a local seraglf container

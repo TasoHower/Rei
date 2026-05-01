@@ -3,9 +3,9 @@ package engine
 import (
 	"context"
 
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/exchange"
-	"loopforge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
 )
 
 // AgentRunner runs one agent loop for a run reference (root or child).

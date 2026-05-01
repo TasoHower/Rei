@@ -4,8 +4,8 @@ import (
 	"os"
 	"strings"
 
-	"loopforge/pkg/agent"
-	deepseekadapter "loopforge/pkg/model/adapters/deepseek"
+	"github.com/TasoHower/rei/loopForge/pkg/agent"
+	deepseekadapter "github.com/TasoHower/rei/loopForge/pkg/model/adapters/deepseek"
 )
 
 const defaultDeepSeekModelName = "deepseek-chat"

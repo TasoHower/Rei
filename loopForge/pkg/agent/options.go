@@ -3,11 +3,11 @@ package agent
 import (
 	"time"
 
-	"loopforge/pkg/mcp/cfg"
-	"loopforge/pkg/model"
-	"loopforge/pkg/runtime/exchange"
-	"loopforge/pkg/skill"
-	"loopforge/pkg/tool"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/skill"
+	"github.com/TasoHower/rei/loopForge/pkg/tool"
 )
 
 // Option configures an Agent when passed to New.

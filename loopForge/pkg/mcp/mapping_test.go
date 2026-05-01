@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"loopforge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
 )
 
 func TestExposedToolName(t *testing.T) {

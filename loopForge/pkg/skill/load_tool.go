@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"loopforge/pkg/model"
-	"loopforge/pkg/tool/autoreg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/tool/autoreg"
 )
 
 const LoadSkillToolName = "load_skill"

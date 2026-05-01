@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	modeliface "loopforge/pkg/model/interface"
-	"loopforge/pkg/model/types"
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/exchange"
-	"loopforge/pkg/runtime/outcome"
-	"loopforge/pkg/runtime/request"
+	modeliface "github.com/TasoHower/rei/loopForge/pkg/model/interface"
+	"github.com/TasoHower/rei/loopForge/pkg/model/types"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
 
 	"github.com/bytedance/sonic"
 )

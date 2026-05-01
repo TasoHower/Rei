@@ -5,7 +5,7 @@ import (
 	"github.com/bytedance/sonic"
 	"strings"
 
-	"loopforge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
 )
 
 const TransferToolPrefix = "transfer_to_"

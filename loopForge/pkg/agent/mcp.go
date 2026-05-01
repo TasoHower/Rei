@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"loopforge/pkg/mcp"
-	"loopforge/pkg/mcp/cfg"
-	"loopforge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
 )
 
 // MCPBinding holds ToolInfos produced from MCP discovery plus a Stop func for session teardown.

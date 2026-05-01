@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"loopforge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
 )
 
 // MCPFields holds MCP server settings from the test UI (custom mode).

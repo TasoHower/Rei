@@ -17,17 +17,17 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 
-	"loopforge/pkg/agent"
-	"loopforge/pkg/log"
-	"loopforge/pkg/mcp/cfg"
-	"loopforge/pkg/model"
-	deepseekadapter "loopforge/pkg/model/adapters/deepseek"
-	"loopforge/pkg/runner"
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/exchange"
-	"loopforge/pkg/runtime/request"
-	"loopforge/pkg/skill"
-	"loopforge/pkg/variable"
+	"github.com/TasoHower/rei/loopForge/pkg/agent"
+	"github.com/TasoHower/rei/loopForge/pkg/log"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	deepseekadapter "github.com/TasoHower/rei/loopForge/pkg/model/adapters/deepseek"
+	"github.com/TasoHower/rei/loopForge/pkg/runner"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/skill"
+	"github.com/TasoHower/rei/loopForge/pkg/variable"
 )
 
 const (

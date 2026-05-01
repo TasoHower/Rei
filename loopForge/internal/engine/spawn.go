@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"loopforge/pkg/runtime/budget"
-	"loopforge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/budget"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
 )
 
 // Spawner creates and runs child agent loops under policy constraints.

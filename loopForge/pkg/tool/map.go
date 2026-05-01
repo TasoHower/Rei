@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	lferrors "loopforge/pkg/errors"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
 )
 
 // MapToolExecutor dispatches by tool name to handlers (argumentsJSON is the model payload).

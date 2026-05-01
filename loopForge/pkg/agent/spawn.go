@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"loopforge/pkg/log"
-	"loopforge/pkg/model"
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/exchange"
-	"loopforge/pkg/runtime/outcome"
-	"loopforge/pkg/runtime/request"
-	"loopforge/pkg/variable"
+	"github.com/TasoHower/rei/loopForge/pkg/log"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/variable"
 )
 
 // Spawner materializes a child [Agent] loop. Default implementation is [defaultSpawner]

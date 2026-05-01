@@ -10,7 +10,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"loopforge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
 )
 
 // ConnectClientSession dials an MCP server per profile and returns a [sdkmcp.ClientSession].

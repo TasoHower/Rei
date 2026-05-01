@@ -7,13 +7,13 @@ import (
 
 	"github.com/bytedance/sonic"
 
-	"loopforge/internal/defaults"
-	"loopforge/pkg/model"
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/exchange"
-	"loopforge/pkg/runtime/outcome"
-	"loopforge/pkg/runtime/request"
-	"loopforge/pkg/tool/autoreg"
+	"github.com/TasoHower/rei/loopForge/internal/defaults"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/tool/autoreg"
 )
 
 type spawnSubagentArgs struct {
