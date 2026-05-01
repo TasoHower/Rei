@@ -5,8 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/outcome"
 )
 
 // ChildState describes the current lifecycle phase of a child Agent run.

@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
-	"github.com/TasoHower/rei/loopForge/pkg/skill"
-	"github.com/TasoHower/rei/loopForge/pkg/variable"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/Rei/loopForge/pkg/skill"
+	"github.com/TasoHower/Rei/loopForge/pkg/variable"
 )
 
 // SystemPromptBuildContext is passed to SystemPromptBuilder when composing the

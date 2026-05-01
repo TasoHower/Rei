@@ -3,14 +3,14 @@ package agent
 import (
 	"context"
 
-	"github.com/TasoHower/rei/loopForge/pkg/log"
-	"github.com/TasoHower/rei/loopForge/pkg/model"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
-	"github.com/TasoHower/rei/loopForge/pkg/skill"
-	"github.com/TasoHower/rei/loopForge/pkg/variable"
+	"github.com/TasoHower/Rei/loopForge/pkg/log"
+	"github.com/TasoHower/Rei/loopForge/pkg/model"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/Rei/loopForge/pkg/skill"
+	"github.com/TasoHower/Rei/loopForge/pkg/variable"
 )
 
 // RunLoop executes the tool-calling loop.

@@ -3,9 +3,9 @@ package engine
 import (
 	"time"
 
-	"github.com/TasoHower/rei/loopForge/pkg/log"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/budget"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/Rei/loopForge/pkg/log"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/budget"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/outcome"
 )
 
 const DefaultGuardTimeout = 5 * time.Second

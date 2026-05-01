@@ -4,10 +4,10 @@ import (
 	"context"
 	"sync"
 
-	"github.com/TasoHower/rei/loopForge/pkg/agent"
-	modeliface "github.com/TasoHower/rei/loopForge/pkg/model/interface"
-	"github.com/TasoHower/rei/loopForge/pkg/model/types"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/Rei/loopForge/pkg/agent"
+	modeliface "github.com/TasoHower/Rei/loopForge/pkg/model/interface"
+	"github.com/TasoHower/Rei/loopForge/pkg/model/types"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/event"
 )
 
 // mockTransferChatModel simulates an agent that calls transfer_to_{target} on the first round.

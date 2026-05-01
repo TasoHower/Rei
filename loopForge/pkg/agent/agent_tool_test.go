@@ -6,12 +6,12 @@ import (
 	"github.com/bytedance/sonic"
 	"testing"
 
-	"github.com/TasoHower/rei/loopForge/pkg/model"
-	modeliface "github.com/TasoHower/rei/loopForge/pkg/model/interface"
-	"github.com/TasoHower/rei/loopForge/pkg/model/types"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
-	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/Rei/loopForge/pkg/model"
+	modeliface "github.com/TasoHower/Rei/loopForge/pkg/model/interface"
+	"github.com/TasoHower/Rei/loopForge/pkg/model/types"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/Rei/loopForge/pkg/runtime/request"
 )
 
 // mockToolLoopChatModel simulates one tool round then a final assistant text (no network).

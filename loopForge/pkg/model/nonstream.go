@@ -3,8 +3,8 @@ package model
 import (
 	"context"
 
-	"github.com/TasoHower/rei/loopForge/pkg/log"
-	"github.com/TasoHower/rei/loopForge/pkg/model/types"
+	"github.com/TasoHower/Rei/loopForge/pkg/log"
+	"github.com/TasoHower/Rei/loopForge/pkg/model/types"
 )
 
 // nonStreamModel wraps a ToolCallingChatModel and forces non-streaming behavior.

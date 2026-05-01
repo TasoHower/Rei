@@ -1,6 +1,6 @@
 package outcome
 
-import "github.com/TasoHower/rei/loopForge/pkg/variable"
+import "github.com/TasoHower/Rei/loopForge/pkg/variable"
 
 // RuntimeOutcome is the synchronous or end-of-stream summary for a run.
 type RuntimeOutcome struct {

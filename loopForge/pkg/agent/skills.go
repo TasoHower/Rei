@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/TasoHower/rei/loopForge/pkg/skill"
+	"github.com/TasoHower/Rei/loopForge/pkg/skill"
 )
 
 func (a *Agent) resolveSkills() ([]skill.SkillSpec, error) {

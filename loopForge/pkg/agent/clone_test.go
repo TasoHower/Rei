@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/Rei/loopForge/pkg/model"
 )
 
 func TestClone_SliceIsolation(t *testing.T) {

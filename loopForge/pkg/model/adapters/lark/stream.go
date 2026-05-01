@@ -4,7 +4,7 @@ import (
 	"io"
 	"strings"
 
-	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
+	lpmodel "github.com/TasoHower/Rei/loopForge/pkg/model"
 
 	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/utils"

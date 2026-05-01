@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
-	"github.com/TasoHower/rei/loopForge/pkg/model"
+	lferrors "github.com/TasoHower/Rei/loopForge/pkg/errors"
+	"github.com/TasoHower/Rei/loopForge/pkg/model"
 )
 
 // Invoke resolves and runs one tool call, in order:
