@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/variable"
+	"github.com/TasoHower/rei/loopForge/pkg/variable"
 )
 
 func TestReplaceDoubleBraceParams(t *testing.T) {

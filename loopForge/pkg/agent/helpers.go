@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/TasoHower/Rei/loopForge/internal/defaults"
-	lferrors "github.com/TasoHower/Rei/loopForge/pkg/errors"
-	"github.com/TasoHower/Rei/loopForge/pkg/mcp"
-	"github.com/TasoHower/Rei/loopForge/pkg/model"
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/request"
-	"github.com/TasoHower/Rei/loopForge/pkg/tool"
+	"github.com/TasoHower/rei/loopForge/internal/defaults"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/tool"
 )
 
 // mergedToolInfos returns ToolInfos + mcpToolInfos + ExtraTools + extraRuntime in the same

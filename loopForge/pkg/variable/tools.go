@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"sort"
 
-	lferrors "github.com/TasoHower/Rei/loopForge/pkg/errors"
-	"github.com/TasoHower/Rei/loopForge/pkg/model"
-	"github.com/TasoHower/Rei/loopForge/pkg/tool/autoreg"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/tool/autoreg"
 )
 
 const varSetToolName = "var_set"

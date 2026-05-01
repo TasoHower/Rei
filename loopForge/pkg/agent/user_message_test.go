@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
-	modeliface "github.com/TasoHower/Rei/loopForge/pkg/model/interface"
-	"github.com/TasoHower/Rei/loopForge/pkg/model/types"
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/request"
-	"github.com/TasoHower/Rei/loopForge/pkg/variable"
+	modeliface "github.com/TasoHower/rei/loopForge/pkg/model/interface"
+	"github.com/TasoHower/rei/loopForge/pkg/model/types"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/variable"
 )
 
 func TestSystemPromptBuilderThenVarStoreBrace(t *testing.T) {

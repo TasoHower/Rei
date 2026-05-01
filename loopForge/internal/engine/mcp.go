@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
 )
 
 // MCPConnector manages MCP server sessions and tool discovery.

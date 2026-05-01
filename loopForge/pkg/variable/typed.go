@@ -3,7 +3,7 @@ package variable
 import (
 	"fmt"
 
-	lferrors "github.com/TasoHower/Rei/loopForge/pkg/errors"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
 )
 
 // ErrNotPresent is returned by GetRequired when the key is missing or the

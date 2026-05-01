@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	lferrors "github.com/TasoHower/Rei/loopForge/pkg/errors"
-	lpmodel "github.com/TasoHower/Rei/loopForge/pkg/model"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
+	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/packages/param"

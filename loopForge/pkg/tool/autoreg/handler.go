@@ -7,7 +7,7 @@ import (
 
 	"github.com/bytedance/sonic"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
 )
 
 // ToolHandlerTyped is a typed tool handler that receives pre-parsed parameters.

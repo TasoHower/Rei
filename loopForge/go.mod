@@ -1,4 +1,4 @@
-module github.com/TasoHower/Rei/loopForge
+module github.com/TasoHower/rei/loopForge
 
 go 1.25.7
 

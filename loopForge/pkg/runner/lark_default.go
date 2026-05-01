@@ -4,8 +4,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/agent"
-	larkadapter "github.com/TasoHower/Rei/loopForge/pkg/model/adapters/lark"
+	"github.com/TasoHower/rei/loopForge/pkg/agent"
+	larkadapter "github.com/TasoHower/rei/loopForge/pkg/model/adapters/lark"
 )
 
 const defaultLarkModelName = "deepseek-v3-2-251201"

@@ -3,7 +3,7 @@ package engine
 import (
 	"sync"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/outcome"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
 )
 
 // ChildRegistry tracks all active child Agent runs for a parent run,

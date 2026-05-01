@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	lpmodel "github.com/TasoHower/Rei/loopForge/pkg/model"
+	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
 
 	dspk "github.com/cohesion-org/deepseek-go"
 )

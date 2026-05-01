@@ -17,17 +17,17 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/agent"
-	"github.com/TasoHower/Rei/loopForge/pkg/log"
-	"github.com/TasoHower/Rei/loopForge/pkg/mcp/cfg"
-	"github.com/TasoHower/Rei/loopForge/pkg/model"
-	deepseekadapter "github.com/TasoHower/Rei/loopForge/pkg/model/adapters/deepseek"
-	"github.com/TasoHower/Rei/loopForge/pkg/runner"
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/event"
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/exchange"
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/request"
-	"github.com/TasoHower/Rei/loopForge/pkg/skill"
-	"github.com/TasoHower/Rei/loopForge/pkg/variable"
+	"github.com/TasoHower/rei/loopForge/pkg/agent"
+	"github.com/TasoHower/rei/loopForge/pkg/log"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	deepseekadapter "github.com/TasoHower/rei/loopForge/pkg/model/adapters/deepseek"
+	"github.com/TasoHower/rei/loopForge/pkg/runner"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/request"
+	"github.com/TasoHower/rei/loopForge/pkg/skill"
+	"github.com/TasoHower/rei/loopForge/pkg/variable"
 )
 
 const (

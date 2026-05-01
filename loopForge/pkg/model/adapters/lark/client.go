@@ -6,7 +6,7 @@ import (
 	"context"
 	"strings"
 
-	lpmodel "github.com/TasoHower/Rei/loopForge/pkg/model"
+	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
 
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"

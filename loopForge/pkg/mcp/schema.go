@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	larkadapter "github.com/TasoHower/Rei/loopForge/pkg/model/adapters/lark"
+	larkadapter "github.com/TasoHower/rei/loopForge/pkg/model/adapters/lark"
 )
 
 // ParseInputSchema converts an MCP tools/list inputSchema payload into a JSON Schema object map.

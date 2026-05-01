@@ -3,11 +3,11 @@ package agent
 import (
 	"context"
 
-	lferrors "github.com/TasoHower/Rei/loopForge/pkg/errors"
-	"github.com/TasoHower/Rei/loopForge/pkg/log"
-	"github.com/TasoHower/Rei/loopForge/pkg/model"
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/event"
-	"github.com/TasoHower/Rei/loopForge/pkg/tool"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
+	"github.com/TasoHower/rei/loopForge/pkg/log"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
+	"github.com/TasoHower/rei/loopForge/pkg/tool"
 )
 
 // executeToolCalls invokes each tool call via tool.Invoke and emits start/end

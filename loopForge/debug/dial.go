@@ -10,10 +10,10 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	mcppkg "github.com/TasoHower/Rei/loopForge/pkg/mcp"
-	"github.com/TasoHower/Rei/loopForge/pkg/mcp/cfg"
-	lferrors "github.com/TasoHower/Rei/loopForge/pkg/errors"
-	applog "github.com/TasoHower/Rei/loopForge/pkg/log"
+	mcppkg "github.com/TasoHower/rei/loopForge/pkg/mcp"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
+	applog "github.com/TasoHower/rei/loopForge/pkg/log"
 )
 
 // Conn wraps an MCP client session for debug operations.

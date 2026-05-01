@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/model"
-	"github.com/TasoHower/Rei/loopForge/pkg/tool/autoreg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/tool/autoreg"
 )
 
 const ShellToolName = "execute_shell_script"

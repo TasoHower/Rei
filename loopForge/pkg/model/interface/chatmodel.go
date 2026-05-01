@@ -4,7 +4,7 @@ package iface
 import (
 	"context"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/model/types"
+	"github.com/TasoHower/rei/loopForge/pkg/model/types"
 )
 
 // BaseChatModel is the narrow chat surface (compare: eino BaseChatModel: Generate + Stream).

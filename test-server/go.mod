@@ -3,7 +3,7 @@ module test-server
 go 1.25.7
 
 require (
-	github.com/TasoHower/Rei/loopForge v0.0.0
+	github.com/TasoHower/rei/loopForge v0.0.0
 	github.com/cloudwego/hertz v0.10.4
 )
 
@@ -49,4 +49,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/TasoHower/Rei/loopForge => ../loopForge
+replace github.com/TasoHower/rei/loopForge => ../loopForge

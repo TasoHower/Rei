@@ -3,8 +3,8 @@ package runner
 import (
 	"context"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/agent"
-	"github.com/TasoHower/Rei/loopForge/pkg/skill"
+	"github.com/TasoHower/rei/loopForge/pkg/agent"
+	"github.com/TasoHower/rei/loopForge/pkg/skill"
 )
 
 // WithSkillRegistry sets a shared registry used when the entry agent has SkillNames

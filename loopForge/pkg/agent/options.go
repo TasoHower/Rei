@@ -3,11 +3,11 @@ package agent
 import (
 	"time"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/mcp/cfg"
-	"github.com/TasoHower/Rei/loopForge/pkg/model"
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/exchange"
-	"github.com/TasoHower/Rei/loopForge/pkg/skill"
-	"github.com/TasoHower/Rei/loopForge/pkg/tool"
+	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/model"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
+	"github.com/TasoHower/rei/loopForge/pkg/skill"
+	"github.com/TasoHower/rei/loopForge/pkg/tool"
 )
 
 // Option configures an Agent when passed to New.

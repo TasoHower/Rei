@@ -3,8 +3,8 @@ package deepseek
 import (
 	"fmt"
 
-	lferrors "github.com/TasoHower/Rei/loopForge/pkg/errors"
-	lpmodel "github.com/TasoHower/Rei/loopForge/pkg/model"
+	lferrors "github.com/TasoHower/rei/loopForge/pkg/errors"
+	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
 
 	dspk "github.com/cohesion-org/deepseek-go"
 )

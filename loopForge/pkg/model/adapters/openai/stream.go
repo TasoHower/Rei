@@ -4,7 +4,7 @@ import (
 	"io"
 	"strings"
 
-	lpmodel "github.com/TasoHower/Rei/loopForge/pkg/model"
+	lpmodel "github.com/TasoHower/rei/loopForge/pkg/model"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/packages/ssestream"

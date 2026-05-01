@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/runtime/tool"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/tool"
 )
 
 // ToolHandler is a single callable tool surface (local, MCP-backed, or builtin).

@@ -1,5 +1,5 @@
 package model
 
-import "github.com/TasoHower/Rei/loopForge/pkg/model/types"
+import "github.com/TasoHower/rei/loopForge/pkg/model/types"
 
 type ToolInfo = types.ToolInfo

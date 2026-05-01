@@ -5,7 +5,7 @@ import (
 	"github.com/bytedance/sonic"
 	"strings"
 
-	"github.com/TasoHower/Rei/loopForge/pkg/variable"
+	"github.com/TasoHower/rei/loopForge/pkg/variable"
 )
 
 // ReplaceDoubleBraceParams replaces segments of the form "{{name}}" in s using params.
