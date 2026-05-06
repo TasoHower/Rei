@@ -1,7 +1,7 @@
 # Rei
 
 > **Rei** 在本项目中与 **loopForge** 等价——它是 Multi-Agent 运行时引擎的名称
-> 本项目遵循 MIT License 开源协议进行发布和维护
+> 本项目遵循 Apache License 2.0 开源协议进行发布和维护
 
 ## 项目结构
 
