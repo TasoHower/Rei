@@ -1,6 +1,7 @@
 # Rei
 
-> **Rei** 在本项目中与 **loopForge** 等价——它是 Multi-Agent 运行时引擎的名称。
+> **Rei** 在本项目中与 **loopForge** 等价——它是 Multi-Agent 运行时引擎的名称
+> 本项目遵循 MIT License 开源协议进行发布和维护
 
 ## 项目结构
 
@@ -13,6 +14,8 @@ Rei/
 > **SeRagLF** 曾作为 Self-RAG Demo 存在于 `SeRagLF/` 目录下，提供基于 Eino `compose.Graph` 的自反思检索增强生成 MCP Server。当前版本已彻底移除。
 
 > **项目状态**：Rei (loopForge) 目前处于 **"Make it work"** 阶段——核心功能已可运行（Agent Loop、Tool Calling、Transfer、Spawn、MCP、Skills），但正确性契约与性能优化尚未系统展开。后续演进路线为 **Make it work → Make it right → Make it fast**。
+
+**你能够在 loopForge/do 目录下找到本项目的所有文档**
 
 ## loopForge
 
