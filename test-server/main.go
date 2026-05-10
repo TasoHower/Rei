@@ -38,6 +38,17 @@ Shared variables appear in a [Variables] block at the end of the system prompt. 
 Use var_set to write user-requested values for writable keys. When MCP arithmetic tools are available (names may be prefixed), call them for every numeric step; do not compute mentally.
 
 After finishing, reply briefly and confirm what you set or computed.`
+	defaultPlanSystemPrompt = `You are the loopForge test assistant in plan mode.
+
+## Execution Flow
+When the query is complex and needs multiple steps, call plan_generate:
+1. FIRST, call plan_generate with a structured plan (title + steps).
+2. THEN execute steps, using plan_update to track progress.
+3. FINALLY summarize the results for the user.
+
+Use tools (add, subtract, etc.) within each step as needed.
+
+The Runner injects detailed Plan Decision Rules separately.`
 	defaultSkillDebugSystemPrompt = `You are the loopForge Skill Runtime debugger (single-agent). Loaded skills appear as markdown sections ## Skill: <name> in the system prompt.
 Follow skill text when it applies. Use built-in add/subtract/multiply/divide tools for arithmetic when MCP tools are not available.
 Use var_set only when testing the variable store. If execute_shell_script or load_skill are listed, use them only as allowed by the skill and tool descriptions.`
@@ -118,9 +129,12 @@ func (r *ChatRequest) resolveDefaults() {
 		if r.SkillDebug {
 			r.SystemPrompt = defaultSkillDebugSystemPrompt
 		} else {
-			if r.Mode == "spawn" {
+			switch r.Mode {
+			case "spawn":
 				r.SystemPrompt = defaultSpawnSystemPrompt
-			} else {
+			case "plan":
+				r.SystemPrompt = defaultPlanSystemPrompt
+			default:
 				r.SystemPrompt = defaultSystemPrompt
 			}
 		}
@@ -382,6 +396,26 @@ func appendSkillRuntimeOpts(req *ChatRequest, reg *skill.SkillRegistry, opts []a
 	return opts
 }
 
+// buildPlanAgent creates the entry agent for plan mode.
+func buildPlanAgent(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffix string, reg *skill.SkillRegistry) *agent.Agent {
+	opts := []agent.Option{
+		agent.WithName("plan-agent"),
+		agent.WithModelName(req.Model),
+		agent.WithMaxSteps(16),
+		agent.WithSystemInstructions(req.SystemPrompt),
+		agent.WithCallOptions(model.WithTemperature(0.1)),
+		agent.WithVariable(),
+		agent.WithToolInfos(mathToolInfos()),
+	}
+	opts = appendSkillRuntimeOpts(req, reg, opts)
+	if len(mcpProf) > 0 {
+		opts = append(opts, agent.WithMCPServerProfiles(mcpProf...))
+	}
+	a := agent.New(nil, opts...)
+	runner.ApplyDeepSeekFromConfig(a, req.APIKey, req.BaseURL, req.Model)
+	return a
+}
+
 // buildTransferEntry returns the entry agent (triage); use runner.NewRunner(entry, ...) with WithVarStore.
 func buildTransferEntry(req *ChatRequest, mcpProf []cfg.MCPServerProfile, mcpSuffix string, reg *skill.SkillRegistry) *agent.Agent {
 	triageOpts := []agent.Option{
@@ -504,6 +538,18 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 				runner.WithVarStore(vstore),
 				runner.WithSkillRegistry(reg),
 			)
+		case "plan":
+			ropts := []runner.RunOption{
+				runner.WithLogger(log.Default()),
+				runner.WithVarStore(vstore),
+			}
+			if reg != nil {
+				ropts = append(ropts, runner.WithSkillRegistry(reg))
+			}
+			ag = runner.NewRunner(
+				buildPlanAgent(&chatReq, mcpProf, mcpSuffix, reg),
+				ropts...,
+			)
 		case "spawn":
 			ropts := []runner.RunOption{
 				runner.WithLogger(log.Default()),
@@ -534,10 +580,14 @@ func handleChat(logger log.Logger) app.HandlerFunc {
 			ag = runner.NewRunner(entry, ropts...)
 		}
 
+		runMode := request.RunModeSingleAgent
+		if chatReq.Mode == "plan" {
+			runMode = request.RunModePlan
+		}
 		req := &request.RuntimeRequest{
 			SessionID:   sessionID,
 			UserMessage: chatReq.Message,
-			RunMode:     request.RunModeSingleAgent,
+			RunMode:     runMode,
 		}
 
 		w := sse.NewWriter(c)
@@ -625,6 +675,18 @@ func runtimeEventToSSE(ev *event.RuntimeEvent) SSEEvent {
 		}
 	case event.EventSpawnEnd:
 		if p := ev.SpawnEnd(); p != nil {
+			out.Data = p
+		}
+	case event.EventPlanGenerated:
+		if p := ev.PlanGenerated(); p != nil {
+			out.Data = p
+		}
+	case event.EventPlanStepStart:
+		if p := ev.PlanStepStart(); p != nil {
+			out.Data = p
+		}
+	case event.EventPlanStepEnd:
+		if p := ev.PlanStepEnd(); p != nil {
 			out.Data = p
 		}
 	case event.EventError:

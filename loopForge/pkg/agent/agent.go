@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/TasoHower/rei/loopForge/pkg/mcp/cfg"
+	"github.com/TasoHower/rei/loopForge/pkg/plan"
 	"github.com/TasoHower/rei/loopForge/pkg/model"
 	"github.com/TasoHower/rei/loopForge/pkg/runtime/event"
 	"github.com/TasoHower/rei/loopForge/pkg/runtime/exchange"
@@ -43,6 +44,9 @@ type LoopState struct {
 	ExtraSkills []skill.SkillSpec
 	// CurrentRunRef, when set by the Runner, identifies this loop for spawn depth and RunID.
 	CurrentRunRef *exchange.RunRef
+	// Plan is the shared execution plan in plan mode. Non-nil when the Runner
+	// is orchestrating a plan-driven execution. Passed across transfer hops.
+	Plan *plan.Plan
 	// asyncWG tracks background spawn tasks that should finish before QueryEnd.
 	asyncWG sync.WaitGroup
 	// asyncSpawnResults collects final text from async spawn children. After

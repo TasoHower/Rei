@@ -1,6 +1,9 @@
 package event
 
-import "github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+import (
+	"github.com/TasoHower/rei/loopForge/pkg/plan"
+	"github.com/TasoHower/rei/loopForge/pkg/runtime/outcome"
+)
 
 // EventMessageType identifies outbound streaming chunks to the client.
 // Values are aligned with multi-agent-server EventMessageType (see doc/design/data-fusion.md §3).
@@ -17,6 +20,9 @@ const (
 	EventAgentTransfer EventMessageType = "agent_transfer"
 	EventSpawnStart    EventMessageType = "spawn_start"
 	EventSpawnEnd      EventMessageType = "spawn_end"
+	EventPlanGenerated EventMessageType = "plan_generated"
+	EventPlanStepStart EventMessageType = "plan_step_start"
+	EventPlanStepEnd   EventMessageType = "plan_step_end"
 	EventVarChange     EventMessageType = "var_change"
 	EventQueryEnd      EventMessageType = "query_end"
 	EventError         EventMessageType = "error"
@@ -67,6 +73,18 @@ func (e *RuntimeEvent) SpawnStart() *SpawnStartPayload {
 }
 func (e *RuntimeEvent) SpawnEnd() *SpawnEndPayload {
 	p, _ := e.Payload.(*SpawnEndPayload)
+	return p
+}
+func (e *RuntimeEvent) PlanGenerated() *PlanGeneratedPayload {
+	p, _ := e.Payload.(*PlanGeneratedPayload)
+	return p
+}
+func (e *RuntimeEvent) PlanStepStart() *PlanStepStartPayload {
+	p, _ := e.Payload.(*PlanStepStartPayload)
+	return p
+}
+func (e *RuntimeEvent) PlanStepEnd() *PlanStepEndPayload {
+	p, _ := e.Payload.(*PlanStepEndPayload)
 	return p
 }
 func (e *RuntimeEvent) VarChange() *VarChangePayload { p, _ := e.Payload.(*VarChangePayload); return p }
@@ -198,6 +216,31 @@ type SpawnEndPayload struct {
 }
 
 func (*SpawnEndPayload) eventPayload() EventMessageType { return EventSpawnEnd }
+
+// PlanGeneratedPayload is emitted after plan_generate creates a plan.
+type PlanGeneratedPayload struct {
+	Plan *plan.Plan `json:"plan"`
+}
+
+func (*PlanGeneratedPayload) eventPayload() EventMessageType { return EventPlanGenerated }
+
+// PlanStepStartPayload is emitted when a plan step transitions to in_progress.
+type PlanStepStartPayload struct {
+	StepID      string `json:"step_id"`
+	Description string `json:"description"`
+	AssignedTo  string `json:"assigned_to"`
+}
+
+func (*PlanStepStartPayload) eventPayload() EventMessageType { return EventPlanStepStart }
+
+// PlanStepEndPayload is emitted when a plan step reaches a terminal status.
+type PlanStepEndPayload struct {
+	StepID string              `json:"step_id"`
+	Status plan.PlanStepStatus `json:"status"`
+	Result string              `json:"result,omitempty"`
+}
+
+func (*PlanStepEndPayload) eventPayload() EventMessageType { return EventPlanStepEnd }
 
 // VarChangePayload is emitted whenever a shared variable is written or deleted.
 type VarChangePayload struct {

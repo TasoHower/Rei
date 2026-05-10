@@ -15,6 +15,7 @@ const (
 	RunModeSingleAgent RunMode = "single_agent"
 	RunModeNetwork     RunMode = "network"
 	RunModeInherit     RunMode = "inherit"
+	RunModePlan        RunMode = "plan"
 )
 
 // RuntimeOptions holds optional overrides; zero value means server defaults.

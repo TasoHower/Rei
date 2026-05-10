@@ -2,7 +2,9 @@
 
 本文件位于**仓库根目录**，供人类与会在根目录查找 `AGENTS.md` 的工具使用。Cursor **项目规则**以 **`.cursor/rules/*.mdc`** 为准（YAML 前置元数据 + 正文）。
 
-## 规则文件（Cursor）
+## 规则文件
+
+### Cursor（`.cursor/rules/*.mdc`）
 
 | 文件 | 作用 | 应用范围 |
 |------|------|----------|
@@ -10,6 +12,33 @@
 | `.cursor/rules/rei-doc-mandatory.mdc` | **文档规范** — `doc/plan/plan-v*.md` 与 `doc/log` 配套、`doc/packages/` 六段、`progress-*.md` 体例 | `alwaysApply: true` |
 | `.cursor/rules/rei-loopforge.mdc` | **loopForge** — v0.8.0 **spawn** 与 `doc/plan` 执行顺序 | `globs: loopForge/**` |
 | `.cursor/rules/rei-go.mdc` | **Go 编码** — 风格、禁止 `iota`、错误处理、分层约定 | `globs: **/*.go` |
+
+### Trae（`.trae/rules/*.md`）
+
+| 文件 | 作用 | 应用范围 |
+|------|------|----------|
+| `.trae/rules/superpowers-bootstrap.md` | **Superpowers 引导** — 会话启动时激活，要求 AI 在任意操作前先检查技能 | `alwaysApply: true` |
+
+### 技能（Superpowers）
+
+从 [obra/superpowers](https://github.com/obra/superpowers) 安装，存放于 `.trae/skills/`：
+
+| 技能 | 描述 |
+|------|------|
+| `brainstorming` | 创意工作前的需求澄清与设计 |
+| `dispatching-parallel-agents` | 独立的并行任务分发 |
+| `executing-plans` | 按已有实施计划执行 |
+| `finishing-a-development-branch` | 完成开发后的合并/PR/清理 |
+| `receiving-code-review` | 接收代码审查反馈 |
+| `requesting-code-review` | 提交前请求代码审查 |
+| `subagent-driven-development` | 子代理驱动的实施 |
+| `systematic-debugging` | 系统化调试流程 |
+| `test-driven-development` | 红-绿-重构 TDD |
+| `using-git-worktrees` | Git 工作树隔离 |
+| `using-superpowers` | 技能使用引导 |
+| `verification-before-completion` | 完成前的验证检查 |
+| `writing-plans` | 编写实施计划 |
+| `writing-skills` | 编写/编辑技能 |
 
 详细说明见 **`.cursor/rules/README.md`**。
 
@@ -57,6 +86,7 @@
 - **必须** 使用 `gofmt`
 - **优先** 具体类型而非 `any`
 - **禁止** 必须在写入端关闭 channel, 严格禁止在读取端关闭
+- **优雅** 使用 `any` 而不是 `interface{}`
 
 ## Git 策略
 
@@ -72,37 +102,3 @@
 - `.cursor/rules/README.md` — 规则目录说明
 - `loopForge/doc/plan/plan-v0.8.0.md` — v0.8.0 实施计划（spawn）
 - `loopForge/doc/log/progress-v0.7.0.md` — 版本计划参考体例
-
----
-
-## 工作反思记录
-
-### v0.9.7 反思（2026-04-30）
-
-> 版本主题：tools 自动化注册 — 基于 struct 反射自动生成 JSON Schema
-
-#### 做得好的
-
-| 实践 | 说明 |
-|------|------|
-| **Plan 迭代** | 用户两次提出修改意见（Parameters 废弃兼容 + 兼容性分析），均在 plan 文件中更新后经确认再编码 |
-| **兼容性分析先行** | 编码前逐工具对比反射生成的 Parameters 与原始手动定义，发现 4 类 10 项差异，避免了上线后行为偏离 |
-| **测试覆盖全面** | 17 个测试覆盖所有类型映射边界，包括循环引用保护、`json:"-"` 隐藏字段、`map[string]interface{}` 无 additionalProperties 等边缘场景 |
-| **逐作业实施** | 核心包 → 4 工具重构 → 文档 → 测试 → 验证，顺序合理且每步编译通过 |
-
-#### 待改进
-
-| 问题 | 影响 | 改进建议 |
-|------|------|---------|
-| **Step 4 验收文档未生成** | 流程中提到 `doc/acceptance/` 但本次未创建验收文档 | Step 4 目前可由最终验证替代，但应明确是否有 minial acceptance 要求；建议在 workflow 中增加"是否需验收文档"的判断节点 |
-| **stray 依赖未清理** | `test-server/go.mod`/`go.sum` 有 v0.9.6 遗留的 `openai-go` 间接依赖未提交 | 每次 commit 前运行 `git status` 检查未预期的文件变更；非本次改动的文件应单独评估是否需一并提交 |
-| **提交信息含特殊字符时 Shell 中断** | multi-line commit message 中含 `\"` 导致命令执行失败 | 使用 `git commit -F` 从临时文件读取提交信息，或使用 heredoc 避免 shell 引号转义问题 |
-| **反射特殊分支未在 plan 中预先识别** | `map[string]interface{}` 与 `map[string]json.RawMessage` 的行为差异在实现时才被确认 | 对涉及反射的变更，plan 中应包含一份"已知的特殊类型/边缘行为清单"以减少实施时的意外发现 |
-
-#### Git 流程记录
-
-```
-commit 7e904f0 (tag: v0.9.7)
-14 files, +1663 / -263 lines
-流程: Plan → 编码(8 subtasks) → 测试(17 tests) → 文档 → commit → tag → push
-```

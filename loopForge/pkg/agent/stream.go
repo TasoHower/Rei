@@ -99,16 +99,43 @@ func consumeStream(
 		if prevChunk.ReasoningContent != "" {
 			emit(step, &event.AnswerPayload{Delta: reasoningBuf.String(), IsReasoning: true, IsFinal: true})
 		}
-		if prevChunk.Content != "" {
+			if prevChunk.Content != "" {
 			emit(step, &event.AnswerPayload{Delta: textBuf.String(), IsFinal: true})
 		}
 	}
 
+	text := deduplicateContent(textBuf.String())
+	if text != textBuf.String() {
+		// Deduplication happened; re-emit with clean text so the frontend
+		// display matches the final FullText.
+		if prevChunk != nil && prevChunk.Content != "" {
+			emit(step, &event.AnswerPayload{Delta: text, IsFinal: true, IsReasoning: false})
+		}
+	}
+	reasoning := reasoningBuf.String()
+
 	return streamResult{
-		Text:          textBuf.String(),
-		ReasoningText: reasoningBuf.String(),
+		Text:          text,
+		ReasoningText: reasoning,
 		ToolCalls:     toolCalls,
 		InputTokens:   inputTok,
 		OutputTokens:  outputTok,
 	}
+}
+
+// deduplicateContent removes content duplication at the halfway point.
+// DeepSeek V4 sometimes repeats the same content twice in the Content stream
+// (the model outputs reasoning_content again as content). This function detects
+// exact 50/50 duplication and truncates to the first half.
+func deduplicateContent(s string) string {
+	n := len(s)
+	if n < 20 {
+		return s
+	}
+	half := n / 2
+	// Only handle exact 50/50 split (byte-level), which matches the observed pattern.
+	if n%2 == 0 && s[:half] == s[half:] {
+		return s[:half]
+	}
+	return s
 }

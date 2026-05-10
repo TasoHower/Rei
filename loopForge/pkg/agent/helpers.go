@@ -22,10 +22,19 @@ func (a *Agent) mergedToolInfos(extraRuntime ...*model.ToolInfo) []*model.ToolIn
 		return nil
 	}
 	merged := make([]*model.ToolInfo, 0, n)
-	merged = append(merged, a.ToolInfos...)
-	merged = append(merged, a.mcpToolInfos...)
-	merged = append(merged, a.ExtraTools...)
-	merged = append(merged, extraRuntime...)
+	seen := make(map[string]bool, n)
+	dedup := func(src []*model.ToolInfo) {
+		for _, ti := range src {
+			if ti != nil && !seen[ti.Name] {
+				seen[ti.Name] = true
+				merged = append(merged, ti)
+			}
+		}
+	}
+	dedup(a.ToolInfos)
+	dedup(a.mcpToolInfos)
+	dedup(a.ExtraTools)
+	dedup(extraRuntime)
 	return merged
 }
 

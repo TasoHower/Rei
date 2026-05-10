@@ -498,6 +498,10 @@
             <div>Transfer</div>
             <div class="mode-desc">triage → math / writer</div>
           </div>
+          <div class="mode-btn" id="modePlan" onclick="setMode('plan'); saveConfig();">
+            <div>Plan</div>
+            <div class="mode-desc">自动生成 Plan → 逐步执行，支持 plan_generate / plan_update</div>
+          </div>
           <div class="mode-btn" id="modeSpawn" onclick="setMode('spawn'); saveConfig();">
             <div>Spawn</div>
             <div class="mode-desc">子 Agent 子任务（spawn_subagent），仅内置四则，不用 MCP</div>
@@ -600,6 +604,7 @@
     const sendBtn = document.getElementById('sendBtn');
 
     let currentAnswerBubble = null;
+    let lastAgentBubble = null; // tracks the most recent agent bubble for query_end FinalText replacement
     let currentReasoningBubble = null;
     let currentAgentName = null;
     let lastSenderIsAgent = false;
@@ -610,7 +615,8 @@
       skill: '请说明当前 system 中是否出现 ## Skill: demo，并一句话概括该 skill 的正文用途。',
       single: '【四则运算测试】请分步计算 (128 + 256) ÷ 4 × 2，每一步用工具，最后给出结果。',
       transfer: '【四则运算测试】请分步计算 (19 + 23) × 2 - 15 ÷ 3。交给算术专家逐步调用工具，最后一句话说明结果。',
-      spawn: '【spawn 演示】请用 spawn_subagent 把子任务「计算 7*8+3」交给子 Agent；工具返回的 JSON 读完后，用自然语言向用户说明结果。'
+      spawn: '【spawn 演示】请用 spawn_subagent 把子任务「计算 7*8+3」交给子 Agent；工具返回的 JSON 读完后，用自然语言向用户说明结果。',
+      plan: '【Plan 演示】请分析以下任务并生成 Plan：计算 (128 + 256) ÷ 4 × 2 - 15 ÷ 3，每个算术运算作为一个独立步骤。将 Plan 输出后按步骤执行。'
     };
 
     const STORAGE_KEY = 'loopforge-config';
@@ -798,6 +804,7 @@
       row.innerHTML = `<div class="avatar">A</div><div class="bubble streaming">${label}</div>`;
       chatArea.appendChild(row);
       currentAnswerBubble = row.querySelector('.bubble');
+      lastAgentBubble = currentAnswerBubble;
       currentAgentName = agentName;
       lastSenderIsAgent = true;
       scroll();
@@ -1096,8 +1103,13 @@
           break;
 
         case 'query_end': {
-          sealAgentBubble();
+          // FinalText is the definitive answer. Replace the last agent bubble
+          // content to correct any duplicates from streaming deltas.
           const oc = data.outcome || data || {};
+          if (oc.FinalText && lastAgentBubble) {
+            lastAgentBubble.textContent = oc.FinalText || '';
+          }
+          sealAgentBubble();
           if (data.variables && data.variables.vars) {
             const lines = data.variables.vars.map((v) =>
               `${v.key}: ${v.value === null || v.value === undefined ? '<unset>' : JSON.stringify(v.value)}`

@@ -5,3 +5,4 @@ test-server/bin/
 .codebuddy/
 .cursor/
 .DS_Store
+.trae/
