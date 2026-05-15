@@ -111,7 +111,7 @@ loopForge 的核心是 Go 语言 SDK，你可以在自己的 Go 项目中直接�
 ### 安装
 
 ```bash
-go get github.com/TasoHower/Rei  # 以实际仓库路径为准
+go get github.com/TasoHower/Rei/Loopforge  # 以实际仓库路径为准
 ```
 
 ### 最小示例：单个 Agent 工具调用
