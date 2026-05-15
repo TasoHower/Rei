@@ -42,7 +42,7 @@ Multi-Agent 运行时引擎，基于 OpenAI 兼容 API 构建，提供可控的 
 
 ```bash
 # 克隆项目
-git clone <repo-url>
+git clone git@github.com:TasoHower/Rei.git
 cd rei
 
 # 设置 LLM API Key（此处以 DeepSeek 为例）
@@ -111,7 +111,7 @@ loopForge 的核心是 Go 语言 SDK，你可以在自己的 Go 项目中直接�
 ### 安装
 
 ```bash
-go get github.com/你的路径/loopforge  # 以实际仓库路径为准
+go get github.com/TasoHower/Rei  # 以实际仓库路径为准
 ```
 
 ### 最小示例：单个 Agent 工具调用
