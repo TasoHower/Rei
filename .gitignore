@@ -1,8 +1,0 @@
-test-server/test-server
-test-server/bin/
-*.hertz.gz
-.vscode/
-.codebuddy/
-.cursor/
-.DS_Store
-.trae/
