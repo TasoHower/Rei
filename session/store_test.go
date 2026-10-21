@@ -92,10 +92,12 @@ func TestFileStoreRoundTripAndPermissions(t *testing.T) {
 		t.Fatalf("读取失败：%+v, %v", snap, err)
 	}
 
-	// 不允许残留临时文件。
+	// 不允许残留临时文件（.lock / .bak 是预期产物）。
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if e.Name() != "abc.json" {
+		switch e.Name() {
+		case "abc.json", "abc.json.lock", "abc.json.bak":
+		default:
 			t.Fatalf("残留文件：%s", e.Name())
 		}
 	}
@@ -124,5 +126,37 @@ func TestFileStoreDetectsTampering(t *testing.T) {
 
 	if _, err := store.Load(ctx, "s1"); !errors.Is(err, ErrChecksum) {
 		t.Fatalf("篡改后应报告校验和错误，得到 %v", err)
+	}
+}
+
+func TestFileStoreFallsBackToBackup(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := testSnapshot("s1")
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	second := testSnapshot("s1")
+	second.Messages = append(second.Messages, core.NewUserTextMessage("第二轮"))
+	if err := store.Save(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+
+	// 破坏主文件：读取应回退到 .bak（第一版快照）。
+	path := filepath.Join(dir, "s1.json")
+	if err := os.WriteFile(path, []byte("{坏掉的 JSON"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := store.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("应从 .bak 恢复：%v", err)
+	}
+	if len(snap.Messages) != 2 {
+		t.Fatalf("回退快照条数 = %d，期望 2（上一版）", len(snap.Messages))
 	}
 }

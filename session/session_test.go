@@ -177,7 +177,7 @@ func TestApprovalFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New("s1", loop)
+	s, err := New("s1", loop, WithHumanApproval())
 	if err != nil {
 		t.Fatal(err)
 	}
