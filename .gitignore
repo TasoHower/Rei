@@ -1,0 +1,15 @@
+# 本地会话数据（含对话正文，绝不入库）
+.rei-sessions/
+
+# 构建产物
+/bin/
+/dist/
+*.test
+*.out
+coverage.out
+
+# 编辑器与系统
+.idea/
+.vscode/
+.cursor/
+.DS_Store
