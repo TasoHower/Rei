@@ -16,16 +16,18 @@ import (
 type modelOutcome struct {
 	text      string
 	reasoning string
+	signature string
 	toolCalls []core.ToolCall
 	finish    string
 	usage     core.Usage
+	requestID string
 }
 
 // streamOnce 在可重试错误上做指数退避重试。
 //
 // 只有「完全没拿到内容」的失败才重试：一旦已经向宿主发出了正文增量，
 // 重试就会造成重复输出，此时宁可失败。
-func (l *AgentLoop) streamOnce(ctx context.Context, msgs []core.Message, handler events.EventHandler, runID string, idx *int) (*modelOutcome, error) {
+func (l *AgentLoop) streamOnce(ctx context.Context, msgs []core.Message, handler events.EventHandler, env runEnv, idx *int) (*modelOutcome, error) {
 	attempts := l.backoff.MaxRetries + 1
 	if attempts < 1 {
 		attempts = 1
@@ -38,7 +40,7 @@ func (l *AgentLoop) streamOnce(ctx context.Context, msgs []core.Message, handler
 				return nil, err
 			}
 		}
-		out, err := l.streamAttempt(ctx, msgs, handler, runID, idx)
+		out, err := l.streamAttempt(ctx, msgs, handler, env, idx)
 		if err == nil {
 			return out, nil
 		}
@@ -47,7 +49,7 @@ func (l *AgentLoop) streamOnce(ctx context.Context, msgs []core.Message, handler
 		pe := provider.Classify(err)
 		retryable := pe.Retryable() && attempt < attempts
 		events.Emit(ctx, handler, &events.LLMError{
-			Base:      l.base(runID, idx),
+			Base:      l.base(env, idx),
 			Kind:      string(pe.Kind),
 			Message:   pe.Message,
 			Retryable: retryable,
@@ -62,7 +64,7 @@ func (l *AgentLoop) streamOnce(ctx context.Context, msgs []core.Message, handler
 
 // streamAttempt 发起一次模型调用，并施加两个看门狗：
 // 首字节超时（连不上或上游卡住）与流中段停滞（连上后不再吐字）。
-func (l *AgentLoop) streamAttempt(ctx context.Context, msgs []core.Message, handler events.EventHandler, runID string, idx *int) (*modelOutcome, error) {
+func (l *AgentLoop) streamAttempt(ctx context.Context, msgs []core.Message, handler events.EventHandler, env runEnv, idx *int) (*modelOutcome, error) {
 	req := provider.Request{
 		Model:     l.model,
 		System:    l.system,
@@ -79,7 +81,7 @@ func (l *AgentLoop) streamAttempt(ctx context.Context, msgs []core.Message, hand
 		}
 	}
 
-	events.Emit(ctx, handler, &events.LLMStart{Base: l.base(runID, idx), Model: l.model, MessageCount: len(msgs)})
+	events.Emit(ctx, handler, &events.LLMStart{Base: l.base(env, idx), Model: l.model, MessageCount: len(msgs)})
 	start := time.Now()
 
 	attemptCtx, cancel := context.WithCancel(ctx)
@@ -128,10 +130,12 @@ func (l *AgentLoop) streamAttempt(ctx context.Context, msgs []core.Message, hand
 		switch chunk.Kind {
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
-			events.Emit(ctx, handler, &events.ContentChunk{Base: l.base(runID, idx), Text: chunk.Text})
+			events.Emit(ctx, handler, &events.ContentChunk{Base: l.base(env, idx), Text: chunk.Text})
 		case provider.ChunkReasoning:
 			reasoning.WriteString(chunk.Text)
-			events.Emit(ctx, handler, &events.ReasoningChunk{Base: l.base(runID, idx), Text: chunk.Text})
+			events.Emit(ctx, handler, &events.ReasoningChunk{Base: l.base(env, idx), Text: chunk.Text})
+		case provider.ChunkSignature:
+			out.signature += chunk.Signature
 		case provider.ChunkToolCall:
 			if chunk.ToolCall != nil {
 				out.toolCalls = append(out.toolCalls, *chunk.ToolCall)
@@ -141,6 +145,7 @@ func (l *AgentLoop) streamAttempt(ctx context.Context, msgs []core.Message, hand
 			if chunk.Usage != nil {
 				out.usage = *chunk.Usage
 			}
+			out.requestID = chunk.RequestID
 		}
 	}
 
@@ -154,17 +159,25 @@ func (l *AgentLoop) streamAttempt(ctx context.Context, msgs []core.Message, hand
 	}
 
 	events.Emit(ctx, handler, &events.LLMEnd{
-		Base:         l.base(runID, idx),
+		Base:         l.base(env, idx),
 		Model:        l.model,
 		FinishReason: out.finish,
 		Usage:        out.usage,
 		DurationMS:   time.Since(start).Milliseconds(),
+		RequestID:    out.requestID,
 	})
 	return out, nil
 }
 
-// base 生成事件信封。idx 由 Run 持有，保证跨轮连续递增。
-func (l *AgentLoop) base(runID string, idx *int) events.Base {
+// base 生成事件信封。idx 由 Run 持有，保证跨轮连续递增；
+// ParentRunID/Depth 让投影端无需额外索引即可还原事件树。
+func (l *AgentLoop) base(env runEnv, idx *int) events.Base {
 	*idx = *idx + 1
-	return events.Base{RunID: runID, Index: *idx, Time: time.Now()}
+	return events.Base{
+		RunID:       env.RunID,
+		ParentRunID: env.ParentRunID,
+		Depth:       env.Depth,
+		Index:       *idx,
+		Time:        time.Now(),
+	}
 }

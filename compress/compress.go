@@ -103,6 +103,45 @@ func estimateString(s string) int {
 	return ascii/4 + other/2
 }
 
+// estimateMessage 估算单条消息的 token（与 EstimateTokens 同口径）。
+func estimateMessage(m core.Message) int {
+	total := 4 + estimateString(m.Reasoning)
+	for _, c := range m.Content {
+		total += estimateString(c.Content)
+	}
+	for _, tc := range m.ToolCalls {
+		total += estimateString(tc.Arguments) + 8
+	}
+	return total
+}
+
+// splitRecentTokens 按 token 预算切近窗：从尾部往前累加，直到超预算。
+//
+// 与按条数切相比，它不会被「一条 50KB 的工具结果」骗过去；
+// 同时仍然避免把 assistant 的 tool_call 与回执切开。
+func splitRecentTokens(messages []core.Message, keepTokens int) (old, recent []core.Message) {
+	if keepTokens <= 0 {
+		return splitRecent(messages, 0)
+	}
+	total := 0
+	cut := len(messages)
+	for i := len(messages) - 1; i >= 0; i-- {
+		cost := estimateMessage(messages[i])
+		if total+cost > keepTokens && cut < len(messages) {
+			break
+		}
+		total += cost
+		cut = i
+	}
+	for cut > 0 && cut < len(messages) && messages[cut].Role == core.Tool {
+		cut--
+	}
+	if cut <= 0 {
+		return nil, append([]core.Message(nil), messages...)
+	}
+	return messages[:cut], append([]core.Message(nil), messages[cut:]...)
+}
+
 // splitRecent 把消息切成「待摘要的旧消息」与「逐字保留的近窗」。
 //
 // 近窗以条数为单位，并保证最后一条 user 文本一定留在原文里：

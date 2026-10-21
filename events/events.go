@@ -41,6 +41,16 @@ const (
 	SessionRunErrorType       EventType = "session_run_error"
 	SessionPersistErrorType   EventType = "session_persist_error"
 	UserInputsConsumedType    EventType = "user_inputs_consumed"
+
+	TaskStartedType         EventType = "task_started"
+	TaskMessageType         EventType = "task_message"
+	TaskEndType             EventType = "task_end"
+	TaskResultDeliveredType EventType = "task_result_delivered"
+
+	PlanGeneratedType     EventType = "plan_generated"
+	PlanUpdatedType       EventType = "plan_updated"
+	PlanStepStartedType   EventType = "plan_step_started"
+	PlanStepCompletedType EventType = "plan_step_completed"
 )
 
 // Event 是处理器收到的唯一类型。所有实现都内嵌 Base，因此事件自带上下文信封。
@@ -55,12 +65,17 @@ type Event interface {
 // EventHandler 消费事件。它必须是非阻塞的：Rei 在运行 goroutine 上同步调用。
 type EventHandler func(ctx context.Context, e Event)
 
-// Base 是所有事件共享的信封：哪一次运行、哪一次上游请求、运行内序号与时间。
+// Base 是所有事件共享的信封：哪一次运行、父运行、运行内序号与时间。
+//
+// ParentRunID 与 Depth 是事件树的唯一来源：子 agent / 后台任务的事件都带着
+// 发起方的 run_id，因此投影端不需要额外的父子表就能还原调用树。
 type Base struct {
-	RunID     string    `json:"run_id,omitempty"`
-	RequestID string    `json:"request_id,omitempty"`
-	Index     int       `json:"index"`
-	Time      time.Time `json:"time"`
+	RunID       string    `json:"run_id,omitempty"`
+	ParentRunID string    `json:"parent_run_id,omitempty"`
+	RequestID   string    `json:"request_id,omitempty"`
+	Index       int       `json:"index"`
+	Depth       int       `json:"depth,omitempty"`
+	Time        time.Time `json:"time"`
 }
 
 // Envelope 让所有内嵌 Base 的事件都满足信封访问器。
@@ -121,6 +136,9 @@ type LLMEnd struct {
 	FinishReason string     `json:"finish_reason"`
 	Usage        core.Usage `json:"usage"`
 	DurationMS   int64      `json:"duration_ms"`
+	// RequestID 是上游响应 id（OpenAI 的 id / Anthropic 的 message.id），
+	// trace 详情可以按它回查这次的原始事件。
+	RequestID string `json:"request_id,omitempty"`
 }
 
 func (e *LLMEnd) Type() EventType { return LLMEndType }
@@ -167,12 +185,14 @@ func (e *ToolRunStart) Type() EventType { return ToolRunStartType }
 // ToolRunEnd 关闭一次工具执行。
 type ToolRunEnd struct {
 	Base
-	CallID     string `json:"call_id"`
-	Name       string `json:"name"`
-	Content    string `json:"content"`
-	IsError    bool   `json:"is_error"`
-	Truncated  bool   `json:"truncated,omitempty"`
-	DurationMS int64  `json:"duration_ms"`
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Content   string `json:"content"`
+	IsError   bool   `json:"is_error"`
+	Truncated bool   `json:"truncated,omitempty"`
+	// Usage 是工具内部消耗的用量（子 agent、内部摘要），已并入运行账本。
+	Usage      core.Usage `json:"usage,omitempty"`
+	DurationMS int64      `json:"duration_ms"`
 }
 
 func (e *ToolRunEnd) Type() EventType { return ToolRunEndType }
@@ -314,4 +334,34 @@ type Approver interface {
 // Asker 回答结构化提问。返回空切片表示人类放弃了这次提问。
 type Asker interface {
 	Ask(ctx context.Context, questions []Question) ([]string, error)
+}
+
+// ApprovalPolicy 决定哪些工具调用需要人类审批。
+//
+// 与 Approver 的分工：Approver 负责「怎么问」，Policy 负责「问不问」。
+// 没有 Policy 时，挂了 Approver 就等价于「每个调用都问」。
+type ApprovalPolicy interface {
+	RequiresApproval(toolName string, readOnly bool) bool
+}
+
+// PolicyFunc 让函数直接实现 ApprovalPolicy。
+type PolicyFunc func(toolName string, readOnly bool) bool
+
+// RequiresApproval 实现 ApprovalPolicy。
+func (f PolicyFunc) RequiresApproval(toolName string, readOnly bool) bool {
+	return f(toolName, readOnly)
+}
+
+// ReadOnlyPolicy 放行只读工具，其余都要审批。
+func ReadOnlyPolicy() ApprovalPolicy {
+	return PolicyFunc(func(_ string, readOnly bool) bool { return !readOnly })
+}
+
+// ToolsPolicy 只对指定工具要求审批。
+func ToolsPolicy(names ...string) ApprovalPolicy {
+	set := map[string]bool{}
+	for _, n := range names {
+		set[n] = true
+	}
+	return PolicyFunc(func(name string, _ bool) bool { return set[name] })
 }

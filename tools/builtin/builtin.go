@@ -40,6 +40,9 @@ func NewWorkspace(root string) ([]tools.Tool, error) {
 		&globTool{w},
 		&grepTool{w},
 		&bashTool{w},
+		&askUserTool{},
+		&httpGetTool{},
+		&runPythonTool{w},
 	}, nil
 }
 

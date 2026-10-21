@@ -41,6 +41,11 @@ type Chunk struct {
 	FinishReason string
 	// Usage 只在 Kind == ChunkDone 时可能非 nil（取决于上游是否回传用量）。
 	Usage *core.Usage
+	// Signature 只在 Kind == ChunkSignature 时有值：Anthropic thinking 块的签名，
+	// 必须与思考正文一起原样回传。
+	Signature string
+	// RequestID 是上游响应 id，随 done 增量带出，供 trace/账本关联。
+	RequestID string
 }
 
 // 增量类型。
@@ -48,6 +53,7 @@ const (
 	ChunkText      = "text"
 	ChunkReasoning = "reasoning"
 	ChunkToolCall  = "tool_call"
+	ChunkSignature = "signature"
 	ChunkDone      = "done"
 )
 

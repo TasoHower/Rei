@@ -22,6 +22,9 @@ const (
 	ContentTypeText    = "text"
 	ContentTypeImage   = "image"
 	ContentTypeSummary = "summary" // 压缩产物，发给模型时按文本处理
+	// ContentTypeTaskResult 是后台任务结果消息（仅 Registry 回填时注入）：
+	// user 角色 + 非 text 块 —— 模型按文本读取并继续工作，但宿主不会把它当成用户输入。
+	ContentTypeTaskResult = "task_result"
 )
 
 // Message 是全链路共享的唯一会话消息模型。
@@ -35,6 +38,9 @@ type Message struct {
 	// Reasoning 是 assistant 的思考内容。推理模型在同一轮里既思考又发起工具调用时，
 	// 这段内容必须原样回传，否则上游接口会拒绝请求。
 	Reasoning string `json:"reasoning,omitempty"`
+	// ReasoningSignature 是 Anthropic thinking 块的签名：必须与 Reasoning 一起
+	// 原样回传，缺失或被改写都会被上游拒绝。OpenAI 兼容协议不使用该字段。
+	ReasoningSignature string `json:"reasoning_signature,omitempty"`
 	// Model 记录产出该消息的模型，用于判断思考签名是否可跨模型回传。
 	Model string `json:"model,omitempty"`
 
@@ -96,11 +102,15 @@ func NewSummaryMessage(text string) Message {
 	return Message{Role: System, Content: []Content{{Type: ContentTypeSummary, Content: text}}}
 }
 
-// Text 拼接消息里的全部文本块。
+// Text 拼接消息里的全部「可供模型阅读」的文本块。
+//
+// task_result 也在这里：后台任务结果对模型来说是正文，只是宿主不该把它
+// 当成用户输入（宿主判断用户输入时应只看 ContentTypeText）。
 func (m *Message) Text() string {
 	out := ""
 	for _, c := range m.Content {
-		if c.Type == ContentTypeText || c.Type == ContentTypeSummary {
+		switch c.Type {
+		case ContentTypeText, ContentTypeSummary, ContentTypeTaskResult:
 			out += c.Content
 		}
 	}
@@ -128,7 +138,7 @@ func (m *Message) Validate() error {
 	}
 	for i, c := range m.Content {
 		switch c.Type {
-		case "", ContentTypeText, ContentTypeImage, ContentTypeSummary:
+		case "", ContentTypeText, ContentTypeImage, ContentTypeSummary, ContentTypeTaskResult:
 		default:
 			return fmt.Errorf("content[%d] 的类型 %q 非法", i, c.Type)
 		}

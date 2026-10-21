@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -139,5 +140,26 @@ func TestBashEnvironmentIsIsolated(t *testing.T) {
 	res := run(t, eng, "bash", `{"command":"echo ${REI_SECRET:-未设置}"}`)
 	if res.IsError || strings.TrimSpace(res.Content) != "未设置" {
 		t.Fatalf("子进程不应继承未白名单的环境变量：%+v", res)
+	}
+}
+
+func TestHTTPGetRejectsPrivateAddresses(t *testing.T) {
+	eng, _ := newEngine(t)
+	for _, u := range []string{"http://127.0.0.1:8080/x", "http://localhost/", "http://10.0.0.1/", "file:///etc/passwd"} {
+		res := run(t, eng, "http_get", `{"url":"`+u+`"}`)
+		if !res.IsError || (!strings.Contains(res.Content, "refusing") && !strings.Contains(res.Content, "unsupported scheme")) {
+			t.Fatalf("%s 应被拒绝：%+v", u, res)
+		}
+	}
+}
+
+func TestRunPython(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("没有 python3")
+	}
+	eng, _ := newEngine(t)
+	res := run(t, eng, "run_python", `{"code":"print(6*7)"}`)
+	if res.IsError || strings.TrimSpace(res.Content) != "42" {
+		t.Fatalf("python 输出 = %+v", res)
 	}
 }

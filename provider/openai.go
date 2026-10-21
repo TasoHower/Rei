@@ -99,6 +99,7 @@ type oaiRequest struct {
 // ---------------------------------------------------------------- 响应结构
 
 type oaiChunk struct {
+	ID      string `json:"id"`
 	Choices []struct {
 		Delta struct {
 			Content          string `json:"content"`
@@ -261,12 +262,13 @@ type openaiStream struct {
 	scanner *bufio.Scanner
 	closed  bool
 
-	pending []Chunk
-	calls   map[int]*toolAcc
-	order   []int
-	usage   *core.Usage
-	finish  string
-	sawDone bool
+	pending   []Chunk
+	calls     map[int]*toolAcc
+	order     []int
+	usage     *core.Usage
+	finish    string
+	requestID string
+	sawDone   bool
 }
 
 // Recv 逐个返回增量。实现要点：文本/思考增量即时返回；工具调用按 index 拼装，
@@ -303,6 +305,9 @@ func (s *openaiStream) Recv() (Chunk, error) {
 		var chunk oaiChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue // 上游偶尔夹杂心跳/非 JSON 行，跳过而不是中断整条流
+		}
+		if chunk.ID != "" {
+			s.requestID = chunk.ID
 		}
 		if chunk.Usage != nil {
 			s.usage = &core.Usage{
@@ -358,7 +363,7 @@ func (s *openaiStream) finalize() {
 		}
 		s.pending = append(s.pending, Chunk{Kind: ChunkToolCall, ToolCall: &call})
 	}
-	done := Chunk{Kind: ChunkDone, FinishReason: s.finish}
+	done := Chunk{Kind: ChunkDone, FinishReason: s.finish, RequestID: s.requestID}
 	if done.FinishReason == "" {
 		done.FinishReason = "stop"
 	}

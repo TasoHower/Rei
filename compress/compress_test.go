@@ -102,8 +102,8 @@ func TestRecentWindowDoesNotSplitToolPairs(t *testing.T) {
 }
 
 func TestLLMCompressorUsesSummaryAndKeepsRecent(t *testing.T) {
-	prov := fakeProvider{chunks: []provider.Chunk{
-		{Kind: provider.ChunkText, Text: "## 任务与目标\n继续改造压缩器。"},
+	prov := &fakeProvider{chunks: []provider.Chunk{
+		{Kind: provider.ChunkText, Text: goodSummary},
 		{Kind: provider.ChunkDone, FinishReason: "stop", Usage: &core.Usage{Input: 500, Output: 30}},
 	}}
 	c := LLM{Provider: prov, Model: "m", KeepRecent: 2}
@@ -124,14 +124,14 @@ func TestLLMCompressorUsesSummaryAndKeepsRecent(t *testing.T) {
 }
 
 func TestLLMCompressorReturnsErrorOnFailure(t *testing.T) {
-	c := LLM{Provider: fakeProvider{err: errors.New("上游挂了")}, Model: "m", KeepRecent: 2}
+	c := LLM{Provider: &fakeProvider{err: errors.New("上游挂了")}, Model: "m", KeepRecent: 2}
 	if _, err := c.Compress(context.Background(), manyMessages(8)); err == nil {
 		t.Fatal("上游失败时压缩器必须返回错误，让调用方保留原上下文")
 	}
 }
 
 func TestLLMCompressorRejectsEmptySummary(t *testing.T) {
-	prov := fakeProvider{chunks: []provider.Chunk{{Kind: provider.ChunkDone, FinishReason: "stop"}}}
+	prov := &fakeProvider{chunks: []provider.Chunk{{Kind: provider.ChunkDone, FinishReason: "stop"}}}
 	c := LLM{Provider: prov, Model: "m", KeepRecent: 2}
 	if _, err := c.Compress(context.Background(), manyMessages(8)); err == nil {
 		t.Fatal("空摘要应当报错")
@@ -147,13 +147,25 @@ func TestLLMCompressorRequiresProvider(t *testing.T) {
 // ---------------------------------------------------------------- 测试夹具
 
 type fakeProvider struct {
-	chunks []provider.Chunk
-	err    error
+	chunks    []provider.Chunk
+	responses [][]provider.Chunk
+	err       error
+	calls     int
+	last      provider.Request
 }
 
-func (f fakeProvider) Stream(context.Context, provider.Request) (provider.Stream, error) {
+func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (provider.Stream, error) {
+	f.calls++
+	f.last = req
 	if f.err != nil {
 		return nil, f.err
+	}
+	if len(f.responses) > 0 {
+		idx := f.calls - 1
+		if idx >= len(f.responses) {
+			idx = len(f.responses) - 1
+		}
+		return &fakeStream{chunks: f.responses[idx]}, nil
 	}
 	return &fakeStream{chunks: f.chunks}, nil
 }
@@ -168,4 +180,109 @@ func manyMessages(n int) []core.Message {
 		msgs = append(msgs, core.NewAssistantMessage([]core.Content{{Type: core.ContentTypeText, Content: "助手回复"}}, "", nil))
 	}
 	return msgs
+}
+
+// goodSummary 覆盖了摘要要求的五个段落。
+const goodSummary = `Task and goal
+继续改造压缩器。
+
+Completed changes
+- compress/llm.go
+
+Key facts and decisions
+- 近窗按 token 预算保留
+
+Remaining work and next steps
+None
+
+Constraints and user preferences
+None`
+
+func TestLLMCompressorRetriesBadSummary(t *testing.T) {
+	bad := []provider.Chunk{
+		{Kind: provider.ChunkText, Text: "太短了，没有段落。"},
+		{Kind: provider.ChunkDone, FinishReason: "stop", Usage: &core.Usage{Input: 100, Output: 10}},
+	}
+	good := []provider.Chunk{
+		{Kind: provider.ChunkText, Text: goodSummary},
+		{Kind: provider.ChunkDone, FinishReason: "stop", Usage: &core.Usage{Input: 120, Output: 40}},
+	}
+	prov := &fakeProvider{responses: [][]provider.Chunk{bad, good}}
+	c := LLM{Provider: prov, Model: "m", KeepRecent: 2}
+
+	res, err := c.Compress(context.Background(), manyMessages(8))
+	if err != nil {
+		t.Fatalf("第二次摘要应当被接受：%v", err)
+	}
+	if prov.calls != 2 {
+		t.Fatalf("应重试一次，实际调用 %d 次", prov.calls)
+	}
+	if res.Usage.Input != 220 || res.Usage.Output != 50 {
+		t.Fatalf("两次摘要的用量应累加：%+v", res.Usage)
+	}
+	if !strings.Contains(prov.last.Messages[0].Text(), "was rejected") {
+		t.Fatal("重试请求应说明上次摘要被拒")
+	}
+}
+
+func TestLLMCompressorRejectsPersistentlyBadSummary(t *testing.T) {
+	bad := []provider.Chunk{
+		{Kind: provider.ChunkText, Text: "还是不合格"},
+		{Kind: provider.ChunkDone, FinishReason: "stop"},
+	}
+	c := LLM{Provider: &fakeProvider{responses: [][]provider.Chunk{bad, bad}}, Model: "m", KeepRecent: 2}
+	if _, err := c.Compress(context.Background(), manyMessages(8)); err == nil {
+		t.Fatal("两次都不合格时应报错（保留原上下文）")
+	}
+}
+
+func TestLLMCompressorKeepsTokenBudget(t *testing.T) {
+	msgs := []core.Message{
+		core.NewUserTextMessage("旧消息 " + strings.Repeat("旧", 4000)),
+		core.NewAssistantMessage([]core.Content{{Type: core.ContentTypeText, Content: strings.Repeat("答", 4000)}}, "", nil),
+		core.NewUserTextMessage("最近一条"),
+	}
+	prov := &fakeProvider{chunks: []provider.Chunk{
+		{Kind: provider.ChunkText, Text: goodSummary},
+		{Kind: provider.ChunkDone, FinishReason: "stop"},
+	}}
+	c := LLM{Provider: prov, Model: "m", KeepTokens: 200}
+
+	res, err := c.Compress(context.Background(), msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// token 预算很小：近窗只应保留最后一条用户消息。
+	if len(res.Messages) != 2 {
+		t.Fatalf("压缩后条数 = %d，期望 2（摘要 + 最近一条）", len(res.Messages))
+	}
+	if !strings.Contains(res.Messages[1].Text(), "最近一条") {
+		t.Fatalf("最近消息未保留：%q", res.Messages[1].Text())
+	}
+}
+
+func TestLLMCompressorIncludesFilesAndAnchor(t *testing.T) {
+	msgs := []core.Message{
+		core.NewUserTextMessage("把 a.txt 改一下"),
+		core.NewAssistantMessage(nil, "", []core.ToolCall{
+			{ID: "c1", Name: "write_file", Arguments: `{"path":"a.txt","content":"x"}`},
+		}),
+		core.NewToolMessage("c1", "write_file", "ok"),
+		core.NewUserTextMessage("继续"),
+	}
+	prov := &fakeProvider{chunks: []provider.Chunk{
+		{Kind: provider.ChunkText, Text: goodSummary},
+		{Kind: provider.ChunkDone, FinishReason: "stop"},
+	}}
+	c := LLM{Provider: prov, Model: "m", KeepRecent: 1}
+	if _, err := c.Compress(context.Background(), msgs); err != nil {
+		t.Fatal(err)
+	}
+	input := prov.last.Messages[0].Text()
+	if !strings.Contains(input, "write_file a.txt") {
+		t.Fatalf("摘要输入缺少文件清单：%s", input)
+	}
+	if !strings.Contains(input, "Most recent user instruction") {
+		t.Fatalf("摘要输入缺少任务锚点：%s", input)
+	}
 }

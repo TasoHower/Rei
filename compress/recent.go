@@ -13,13 +13,20 @@ import (
 // 但行为完全确定。
 type RecentWindow struct {
 	Trigger
-	// KeepRecent 是逐字保留的最近消息条数。
+	// KeepRecent 是逐字保留的最近消息条数（KeepTokens 为 0 时生效）。
 	KeepRecent int
+	// KeepTokens 是逐字保留的近窗 token 预算。
+	KeepTokens int
 }
 
 // Compress 实现 Compressor。
 func (c RecentWindow) Compress(_ context.Context, messages []core.Message) (Result, error) {
-	old, recent := splitRecent(messages, c.recent())
+	var old, recent []core.Message
+	if c.KeepTokens > 0 {
+		old, recent = splitRecentTokens(messages, c.KeepTokens)
+	} else {
+		old, recent = splitRecent(messages, c.recent())
+	}
 	if len(old) == 0 {
 		return Result{Messages: append([]core.Message(nil), messages...)}, nil
 	}

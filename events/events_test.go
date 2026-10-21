@@ -71,6 +71,19 @@ func TestEveryEventExposesTypeAndEnvelope(t *testing.T) {
 		{&SessionRunError{Base: base}, SessionRunErrorType},
 		{&SessionPersistError{Base: base}, SessionPersistErrorType},
 		{&UserInputsConsumed{Base: base}, UserInputsConsumedType},
+		{&TaskStarted{Base: base}, TaskStartedType},
+		{&TaskMessage{Base: base}, TaskMessageType},
+		{&TaskEnd{Base: base}, TaskEndType},
+		{&TaskResultDelivered{Base: base}, TaskResultDeliveredType},
+		{&PlanGenerated{Base: base}, PlanGeneratedType},
+		{&PlanUpdated{Base: base}, PlanUpdatedType},
+		{&PlanStepStarted{Base: base}, PlanStepStartedType},
+		{&PlanStepCompleted{Base: base}, PlanStepCompletedType},
+	}
+
+	// 事件集合是封闭契约：新增类型必须同步更新本表与 README 的数量说明。
+	if len(cases) != 28 {
+		t.Fatalf("事件类型数 = %d，期望 28", len(cases))
 	}
 	for _, c := range cases {
 		if got := c.ev.Type(); got != c.want {

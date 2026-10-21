@@ -23,6 +23,10 @@ const (
 	DefaultMaxParallel = 4
 	DefaultToolTimeout = 5 * time.Minute
 	DefaultMaxOutput   = 20_000
+	// DefaultMaxImages / DefaultMaxImageBytes 是图片闸门：一次工具结果最多带
+	// 4 张、每张 3 MiB，超出部分丢弃并标注，避免单次调用把上下文撑爆。
+	DefaultMaxImages     = 4
+	DefaultMaxImageBytes = 3 << 20
 )
 
 // Result 是工具交还给循环的结果。
@@ -32,6 +36,9 @@ type Result struct {
 	IsError   bool
 	Truncated bool
 	Metadata  map[string]any
+	// Usage 是工具内部消耗的模型用量（例如子 agent、内部摘要调用）。
+	// 循环会把它并入本次运行的账本，否则预算护栏会被绕过。
+	Usage core.Usage
 }
 
 // ErrorResult 构造一个失败结果。
@@ -72,6 +79,8 @@ type Engine struct {
 	maxParallel int
 	timeout     time.Duration
 	maxOutput   int
+	maxImages   int
+	maxImageSz  int
 }
 
 // Option 配置引擎。
@@ -104,6 +113,18 @@ func WithMaxOutputBytes(n int) Option {
 	}
 }
 
+// WithImageLimits 设置单次结果携带图片的张数与单张大小上限。
+func WithImageLimits(count, bytesPerImage int) Option {
+	return func(e *Engine) {
+		if count > 0 {
+			e.maxImages = count
+		}
+		if bytesPerImage > 0 {
+			e.maxImageSz = bytesPerImage
+		}
+	}
+}
+
 // NewEngine 构造带默认值的引擎。
 func NewEngine(opts ...Option) *Engine {
 	e := &Engine{
@@ -111,6 +132,8 @@ func NewEngine(opts ...Option) *Engine {
 		maxParallel: DefaultMaxParallel,
 		timeout:     DefaultToolTimeout,
 		maxOutput:   DefaultMaxOutput,
+		maxImages:   DefaultMaxImages,
+		maxImageSz:  DefaultMaxImageBytes,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -225,9 +248,28 @@ func (e *Engine) runBatch(ctx context.Context, calls []core.ToolCall, out []Exec
 func (e *Engine) runOne(ctx context.Context, call core.ToolCall) ExecResult {
 	start := time.Now()
 	res := e.callSafely(ctx, call)
-	res.Result = e.truncate(res.Result)
+	res.Result = e.gate(res.Result)
 	res.Duration = time.Since(start)
 	return res
+}
+
+// gate 同时施加文本截断与图片闸门。
+func (e *Engine) gate(r Result) Result {
+	r = e.truncate(r)
+	if len(r.Images) > e.maxImages {
+		r.Images = r.Images[:e.maxImages]
+		r.Truncated = true
+	}
+	kept := r.Images[:0]
+	for _, img := range r.Images {
+		if len(img.Content) > e.maxImageSz {
+			r.Truncated = true
+			continue
+		}
+		kept = append(kept, img)
+	}
+	r.Images = kept
+	return r
 }
 
 // callSafely 施加超时并把 panic 转成错误结果：
