@@ -1,353 +1,284 @@
 # Rei
 
-> **Rei** 在本项目中与 **loopForge** 等价——它是 Multi-Agent 运行时引擎的名称
-> 本项目遵循 Apache License 2.0 开源协议进行发布和维护
-
-## 项目结构
+**Go 语言实现的 Agent Development Kit（ADK）** —— 把「模型调用 · 工具执行 · 上下文压缩 · 审批 · 崩溃恢复」做成一层可嵌入的运行时，让宿主只负责驱动会话、消费事件。
 
 ```
-Rei/
-├── loopForge/      # Multi-Agent 运行时引擎（本项目核心）
-└── test-server/    # Agent 调试测试服务器
+module github.com/tasohower/rei   ·   Go 1.25   ·   零第三方依赖   ·   MIT
 ```
-
-> **SeRagLF** 曾作为 Self-RAG Demo 存在于 `SeRagLF/` 目录下，提供基于 Eino `compose.Graph` 的自反思检索增强生成 MCP Server。当前版本已彻底移除。
-
-> **项目状态**：Rei (loopForge) 目前处于 **"Make it work"** 阶段——核心功能已可运行（Agent Loop、Tool Calling、Transfer、Spawn、MCP、Skills），但正确性契约与性能优化尚未系统展开。后续演进路线为 **Make it work → Make it right → Make it fast**。
-
-**你能够在 loopForge/do 目录下找到本项目的所有文档**
-
-## loopForge
-
-Multi-Agent 运行时引擎，基于 OpenAI 兼容 API 构建，提供可控的 Agent 循环、工具调用、MCP 集成、Skills 注入和动态 spawn 能力。
-
-**核心特性：**
-
-- **Agent Loop**：单 Agent 迭代运行，支持 LLM 调用与工具执行的交替循环
-- **Multi-Agent**：静态 Network（Parallel / Sequential / Competitive）+ 动态 spawn（受深度、并发、预算约束）
-- **MCP 集成**：多 Server 管理、工具白名单与前缀隔离
-- **Skills**：`SKILL.md` 解析与受信加载
-- **可观测性**：OTel trace + metrics、token/cost 聚合
 
 ---
 
-## Quick Start
+## 为什么需要 Rei
 
-### 前置条件
+自己写一个 agent 循环，第一版通常 200 行就能跑起来。真正花时间的是后面这些事：
 
-- Go 1.25+
-- 至少一个 LLM API Key（任选一）：`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`LARK_API_KEY`
+| 问题 | 朴素实现的后果 | Rei 的做法 |
+|---|---|---|
+| 上游 429 / 流中断 | 整轮失败，用户重发 | 错误语义 + 指数退避 + 首字/停滞双看门狗 |
+| 上下文变长 | 一次请求打爆窗口 | 用量驱动的压缩，近窗原文逐字保留 |
+| 危险工具 | 无人可拦 | 审批 FIFO，只有队首可决定，超时即拒绝 |
+| 慢工具 / panic 工具 | 拖死整轮 / 打掉运行 | 分桶并发 + 单工具超时 + panic 收敛为错误结果 |
+| 进程崩溃 | 对话全丢 | revision + 校验和的原子检查点 |
+| 成本失控 | 月底才知道 | µUSD 整数记账 + 运行级预算 |
 
-### 启动调试服务器
+Rei 把这些做成**一层库**，而不是一个服务：没有服务端、没有账号、没有遥测。
 
-```bash
-# 克隆项目
-git clone git@github.com:TasoHower/Rei.git
-cd rei
+## 设计边界
 
-# 设置 LLM API Key（此处以 DeepSeek 为例）
-export DEEPSEEK_API_KEY="sk-xxx"
+**Rei 负责**：一次运行内的推理循环、工具协议与执行、上下文压缩、审批、事件契约、会话容器与持久化。
 
-# 启动 test-server（HTTP + SSE + Web UI）
-cd test-server
-./start.sh
+**Rei 不负责**（应由宿主实现）：HTTP/CLI 入口、多租户与鉴权、UI、IM 网关、定时调度、子 agent 编排、MCP 客户端。这些能力在宿主里做，才不会把内核绑死在某个产品上。
+
+## 架构
+
+```
+┌── 宿主 ────────────────────────────────────────────────┐
+│  CLI · Web 服务 · 机器人 · IDE 插件                     │
+│  驱动 Session.Ask / Session.Run，消费 events.Event      │
+└───────────────▲────────────────────────────────────────┘
+                │ 命令 ⇄ 事件（进程内 Go API）
+┌───────────────┴── Rei 内核 ────────────────────────────┐
+│  session/   长时容器：输入队列 · 历史 · 用量 · 审批 · 持久化 │
+│  agents/    运行引擎：ReAct 循环 · 重试 · 压缩 · 预算护栏   │
+│  tools/     工具协议 + 执行引擎（分桶/超时/panic/截断）     │
+│  provider/  模型接入：流式协议 · 错误分类 · 退避            │
+│  compress/  压缩策略：触发判断 · LLM 摘要 · 近窗保留        │
+│  events/    对外唯一契约（只依赖 core）                    │
+│  core/      零依赖共享类型：消息 · 工具调用 · 用量 · 成本    │
+└────────────────────────────────────────────────────────┘
 ```
 
-启动后终端输出：
+依赖方向严格单向：`core → events/provider/tools → compress/agents → session → 宿主`。
+
+三个对象承载全部状态：
+
 ```
-==> building test-server ...
-==> starting on http://localhost:8191
-```
-
-浏览器会自动打开 `http://localhost:8191`，进入 Agent 调试 Web UI。
-
-### 发送聊天请求
-
-Web UI 中直接输入消息即可。底层等价于以下 API 调用：
-
-```bash
-curl -X POST http://localhost:8191/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "计算 123 * 456 + 789",
-    "api_key": "sk-xxx",
-    "base_url": "https://api.deepseek.com/",
-    "model": "deepseek-chat"
-  }'
+Session        长时容器 —— 跨 Run 的状态都在这里
+ └─ AgentLoop  运行引擎 —— 配置不可变，可复用、可并发
+     └─ RunRequest / RunResult  单次运行 —— 用完即弃
 ```
 
-### 可选：启动 MCP 测试服务
+## 能力清单
 
-如需测试 MCP 工具集成：
+| 能力 | 说明 | 位置 |
+|---|---|---|
+| ReAct 循环 | 多轮「调模型 → 执行工具 → 回填结果」，轮次护栏 | `agents/loop.go` |
+| 流式输出 | 正文/思考增量事件，增量不落盘 | `agents/stream.go` |
+| 错误语义与重试 | `rate_limit / upstream / context_exceeded / permanent / canceled`，指数退避 + 抖动 | `provider/errors.go`、`provider/backoff.go` |
+| 双看门狗 | 首字节超时（默认 90s）与流中段停滞（默认 3min） | `agents/stream.go` |
+| 上下文压缩 | 真实用量优先、LLM 结构化摘要、近窗原文保留、失败保留原上下文 | `compress/` |
+| 工具执行引擎 | 只读并行 / 写串行、单工具超时、panic 兜底、输出头尾截断 | `tools/engine.go` |
+| 内置工具 | `read_file / write_file / edit_file / glob / grep / bash` | `tools/builtin/` |
+| 审批（HITL） | 单一 FIFO、跨调用共享、只有队首可决定、超时视为拒绝 | `session/approval.go` |
+| 事件契约 | 20 种事件，统一信封（run_id / index / time） | `events/events.go` |
+| 会话容器 | 输入队列背压、单会话串行、优雅关闭 | `session/session.go` |
+| 持久化 | revision 单调、sha256 校验、tmp→fsync→rename→fsync(dir)、0600 | `session/store.go` |
+| 成本护栏 | 整数 µUSD 记账、价表折算、运行级预算 | `core/usage.go`、`agents/loop.go` |
+| 路径containment | 工具路径限制在工区内，越界直接拒绝 | `tools/builtin/builtin.go` |
+| 命令护栏 | 破坏性命令静态拒绝 + 环境变量白名单 | `tools/builtin/bash.go` |
 
-```bash
-# 启动 test-mcp（算术工具 MCP Server）
-cd test-mcp
-go run .
+**刻意没有做**：子 agent / MCP / hooks / 定时任务 / IM / 沙箱。原因见「设计边界」——它们要么属于宿主，要么需要产品形态才能定义清楚。
 
-# 默认监听 :9089，test-server 自动连接（环境变量 LOOPFORGE_MCP_TEST_URL 可覆盖）
-```
+## 快速开始
 
-然后在 Web UI 的 MCP 下拉选择「env」（默认值），即可看到 `add`、`subtract`、`multiply`、`divide` 等 MCP 工具被自动注入到 Agent 的工具列表中。
-
-### 环境变量速查
-
-| 变量 | 用途 | 默认值 |
-|------|------|--------|
-| `OPENAI_API_KEY` | OpenAI 兼容 API Key（最后兜底） | — |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key | — |
-| `LARK_API_KEY` | 火山方舟 API Key | — |
-| `OPENAI_BASE_URL` | OpenAI 兼容 API 地址 | `https://api.openai.com/v1` |
-| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com/` |
-| `OPENAI_MODEL` | OpenAI 默认模型 | `gpt-4o-mini` |
-| `DEEPSEEK_MODEL` | DeepSeek 默认模型 | `deepseek-chat` |
-| `ADDR` | test-server 监听地址 | `:8191` |
-| `TEST_SERVER_DISABLE_MCP` | 设为 `1` 禁用 MCP 自动连接 | — |
-
-## loopForge SDK
-
-loopForge 的核心是 Go 语言 SDK，你可以在自己的 Go 项目中直接引用。
-
-### 安装
-
-```bash
-go get github.com/TasoHower/Rei/Loopforge  # 以实际仓库路径为准
-```
-
-### 最小示例：单个 Agent 工具调用
-
-以下示例创建了一个带四则运算工具的 Agent，通过 OpenAI 适配器调用 LLM：
+### 1. 接一个模型
 
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"io"
-	"os"
-
-	lpagent "loopforge/pkg/agent"
-	lpmodel "loopforge/pkg/model"
-	openaiadapter "loopforge/pkg/model/adapters/openai"
-	lprunner "loopforge/pkg/runner"
-	"loopforge/pkg/runtime/event"
-	"loopforge/pkg/runtime/request"
-)
-
-// mathToolInfos 注册一组可用工具（add/subtract/multiply/divide）
-func mathToolInfos() []*lpmodel.ToolInfo {
-	binarySchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"a": map[string]interface{}{"type": "number"},
-			"b": map[string]interface{}{"type": "number"},
-		},
-		"required": []string{"a", "b"},
-	}
-	handler := func(name string, op func(a, b float64) float64) lpmodel.ToolCallHandler {
-		return func(_ context.Context, argsJSON string) (string, error) {
-			var args struct{ A, B float64 }
-			// 生产代码应使用 json.Unmarshal
-			fmt.Sscanf(argsJSON, `{"a":%f,"b":%f}`, &args.A, &args.B)
-			return fmt.Sprintf("%.6g", op(args.A, args.B)), nil
-		}
-	}
-	return []*lpmodel.ToolInfo{
-		{Name: "add", Description: "Return a + b", Parameters: binarySchema,
-			Handle: handler("add", func(a, b float64) float64 { return a + b })},
-		{Name: "multiply", Description: "Return a * b", Parameters: binarySchema,
-			Handle: handler("multiply", func(a, b float64) float64 { return a * b })},
-	}
-}
-
-func main() {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		fmt.Println("请设置 OPENAI_API_KEY")
-		os.Exit(1)
-	}
-
-	// 1. 创建 ChatModel（OpenAI SDK 兜底适配器）
-	chat := openaiadapter.NewOpenAIChatModel(apiKey, "", "gpt-4o-mini")
-
-	// 2. 创建 Agent（绑定工具和系统提示词）
-	ag := lpagent.New(chat,
-		lpagent.WithSystemInstructions(
-			"你是一个数学助手。请使用工具计算，不要心算。",
-		),
-		lpagent.WithToolInfos(mathToolInfos()),
-		lpagent.WithMaxSteps(12),
-	)
-
-	// 3. 创建 Runner 并执行
-	runner := lprunner.NewRunner(ag)
-	req := &request.RuntimeRequest{
-		SessionID:   "demo",
-		UserMessage: "计算 12 * 34 + 56",
-	}
-
-	ch := runner.Run(context.Background(), req)
-
-	// 4. 消费事件流（SSE 风格）
-	for ev := range ch {
-		switch ev.Type {
-		case event.EventAnswer:
-			if p := ev.Answer(); p != nil {
-				fmt.Print(p.Content)
-			}
-		case event.EventCallLLMStart:
-			if p := ev.CallLLMStart(); p != nil {
-				fmt.Printf("\n[LLM 调用] model=%s\n", p.Model)
-			}
-		case event.EventToolCallStart:
-			if p := ev.ToolCallStart(); p != nil {
-				fmt.Printf("[工具调用] %s(args=%s)\n", p.Name, p.Arguments)
-			}
-		case event.EventToolCallEnd:
-			if p := ev.ToolCallEnd(); p != nil {
-				fmt.Printf("[工具结果] %s -> %s\n", p.Name, p.Output)
-			}
-		case event.EventQueryEnd:
-			fmt.Println("\n[运行结束]")
-		case event.EventError:
-			if p := ev.Error(); p != nil {
-				fmt.Fprintf(os.Stderr, "[错误] %s: %s\n", p.Code, p.Message)
-			}
-		}
-		if ev.Type == event.EventQueryEnd || ev.Type == event.EventError {
-			break
-		}
-	}
-	_ = io.EOF // 抑制未使用导入
-}
+prov, err := provider.NewOpenAI(provider.OpenAIConfig{
+    BaseURL: "https://api.deepseek.com/v1", // 任何 OpenAI 兼容网关
+    APIKey:  os.Getenv("REI_API_KEY"),
+})
 ```
 
-运行：
-
-```bash
-export OPENAI_API_KEY="sk-xxx"
-go run main.go
-```
-
-### 多 Agent 转移（Handoff）
+### 2. 组装引擎
 
 ```go
-// 创建两个 Agent，通过 handoff 连接
-mathExpert := lpagent.New(chat,
-	lpagent.WithName("math_expert"),
-	lpagent.WithSystemInstructions("你是数学专家。"),
-	lpagent.WithToolInfos(mathToolInfos()),
-)
-writer := lpagent.New(chat,
-	lpagent.WithName("writer"),
-	lpagent.WithSystemInstructions("你是创意写手。"),
-)
+engine := tools.NewEngine(tools.WithToolTimeout(2 * time.Minute))
+if err := builtin.RegisterWorkspace(engine, "."); err != nil {
+    panic(err)
+}
 
-// triage 作为入口 Agent，根据用户意图分派
-triage := lpagent.New(chat,
-	lpagent.WithName("triage"),
-	lpagent.WithSystemInstructions("路由到 math_expert 或 writer，不要自己回答。"),
+loop, err := agents.NewAgentLoop(prov,
+    agents.WithModel("deepseek-chat"),
+    agents.WithToolEngine(engine),
+    agents.WithMaxIterations(16),
+    agents.WithPricing(core.Pricing{Input: 270_000, Output: 1_100_000}), // 每百万 token 的 µUSD
+    agents.WithMaxCost(500_000),                                          // 单次运行 0.5 美元上限
+    agents.WithCompressor(compress.LLM{
+        Provider:   prov,
+        Model:      "deepseek-chat",
+        Trigger:    compress.Trigger{ContextWindow: 64_000},
+        KeepRecent: 8,
+    }),
 )
-triage.AddHandoff(mathExpert, writer)
-
-// 使用 Runner 自动执行 transfer loop
-runner := lprunner.NewRunner(triage, lprunner.WithMaxTransfers(10))
-ch := runner.Run(ctx, &request.RuntimeRequest{UserMessage: "写一首诗"})
-// ... 消费事件流同上
 ```
 
-### SDK 核心包概览
+### 3. 跑一个会话
 
-| 包路径 | 职责 |
-|--------|------|
-| `loopforge/pkg/agent` | Agent 定义、`New()`、`RunLoop`、Option 配置、Handoff 注册 |
-| `loopforge/pkg/runner` | Runner 编排器 `NewRunner()`，管理 transfer loop、spawn、budget |
-| `loopforge/pkg/model` | ChatModel 接口、Message、ToolInfo、CallOption 类型 |
-| `loopforge/pkg/model/adapters/openai` | OpenAI SDK 兜底适配器 `OpenAIChatModel` |
-| `loopforge/pkg/model/adapters/lark` | 火山方舟/Ark 适配器 `LarkChatModel` |
-| `loopforge/pkg/model/adapters/deepseek` | DeepSeek 适配器 `DeepSeekChatModel` |
-| `loopforge/pkg/tool` | ToolCall 分派与执行 `Invoke()` |
-| `loopforge/pkg/mcp` | MCP 客户端、BootstrapToolInfos |
-| `loopforge/pkg/skill` | SKILL.md 解析与注册表 |
-| `loopforge/pkg/variable` | 变量存储（var_set 工具） |
-| `loopforge/pkg/runtime/event` | 运行时事件类型（EventAnswer / EventCallLLMStart 等） |
-| `loopforge/pkg/runtime/request` | RuntimeRequest 定义 |
-| `loopforge/pkg/errors` | sentinel 错误（ErrInvalidConfig、ErrGenerate 等） |
+```go
+store, _ := session.NewFileStore("./.rei-sessions")
+s, _ := session.New("demo", loop, session.WithStore(store))
+defer s.Shutdown(context.Background(), nil)
 
-## test-server
+_ = s.Ask(context.Background(), core.NewUserTextMessage("统计仓库里有多少个 Go 文件"))
 
-基于 Hertz 的 Agent 调试服务器，提供 Web UI 和 SSE 流式接口，用于测试 loopForge 引擎的 Agent 运行效果。内置四则运算工具，LLM 侧使用 **Lark（火山 Ark）** 适配器（`volcengine-go-sdk`）。
+err = s.Run(context.Background(), func(ctx context.Context, e events.Event) {
+    switch ev := e.(type) {
+    case *events.ContentChunk:
+        fmt.Print(ev.Text)
+    case *events.ToolRunStart:
+        fmt.Printf("\n[工具] %s\n", ev.Name)
+    case *events.AgentEnd:
+        fmt.Printf("\n结束：%s，成本 %dµUSD\n", ev.FinishReason, ev.Usage.Cost.Total())
+    }
+})
+```
+
+完整的可运行示例见 [`examples/quickstart`](examples/quickstart/main.go)：
 
 ```bash
-cd test-server
-./start.sh
+export REI_API_KEY=sk-...
+go run ./examples/quickstart "统计本仓库有多少个 Go 文件"
 ```
 
-## 愿景
+### 4. 接入审批
 
-Rei / loopForge 的目标是构建一套 **Go 原生的 Multi-Agent 运行时引擎**——从底层的 Agent 循环、工具执行，到上层的多智能体协作、spawn、MCP 集成，再到端到端的可观测与调试体验，形成闭环。
+```go
+// 会话本身就是 Approver：AgentLoop 每次要跑工具前都会先问它。
+go func() {
+    for ids := s.PendingApprovals(); ; ids = s.PendingApprovals() {
+        if len(ids) > 0 {
+            _ = s.ResolveApproval(ids[0], true, "允许") // 也可以拒绝或改参数
+        }
+        time.Sleep(100 * time.Millisecond)
+    }
+}()
+```
 
-### 近期里程碑
+宿主应当把这个循环换成真正的 UI 交互；`PendingApprovals` 返回的是**队首有序**列表，只有第一个可以被解决。
 
-- **Multi-Agent spawn**：父子 Run 递归调用，支持动态创建子 Agent 并回注结果，MaxDepth / 并发 / 预算硬限制
-- **MCP 客户端**：stdio / Streamable HTTP transport，tools/list 自动发现与注册
-- **Skill 注册表**：`SKILL.md` 指令注入 + MCP 能力发现统一注册，支持动态启停与审计
-- **工具权限收敛**：per-agent / per-spawn 的 whitelist / blacklist
+## 核心 API
 
-### 中期方向
+| 类型 | 职责 | 关键方法 |
+|---|---|---|
+| `core.Message` | 唯一会话消息模型（user / assistant / tool / system） | `Validate`、`Text` |
+| `core.Usage` / `Cost` | 用量与 µUSD 成本 | `Add`、`PricedUsage` |
+| `events.Event` | 全部可观测步骤 | `Type`、`Envelope` |
+| `tools.Tool` | 一个可调用能力 | `Name`、`Parameters`、`CanParallel`、`Call` |
+| `tools.Engine` | 工具注册与执行 | `Register`、`Execute`、`Specs` |
+| `provider.Provider` | 一条模型流 | `Stream` |
+| `agents.AgentLoop` | 运行引擎 | `RunStream` |
+| `compress.Compressor` | 压缩策略 | `Decide`、`Compress` |
+| `session.Session` | 长时容器 | `Ask`、`Run`、`ResolveApproval`、`Shutdown` |
+| `session.Store` | 持久化后端 | `Save`、`Load` |
 
-- **Reflection / Retry**：工具调用失败后模型自反思并重试
-- **Cost Tracing**：从模型 adapter 层采集 usage，沿 Run 树聚合到 RunMetrics
-- **Dev UI**：进程内 HTTP Debug Server + 浏览器可视化面板，展示 Run 时间线、spawn 树、tool 调用与 token/cost 聚合
+### 扩展点
 
-### 长期愿景
+| 想改什么 | 实现什么 | 说明 |
+|---|---|---|
+| 换模型协议 | `provider.Provider` | 只需实现 `Stream`；自带 OpenAI 兼容实现 |
+| 换压缩策略 | `compress.Compressor` | `Decide` 决定时机，`Compress` 决定产物；失败必须返回 error |
+| 换存储 | `session.Store` | Web 宿主建议实现 DB 版；文件版见 `FileStore` |
+| 加工具 | `tools.Tool` | `CanParallel=true` 表示只读、可并发 |
+| 换审批交互 | `events.Approver` | 或直接用 `Session` 的 FIFO |
+| 加工件提示 | `agents.WithSystemPromptExtra` | 与基础契约分层拼接，字节稳定 |
 
-- **生产级多智能体**：静态 Network + 动态 spawn 支撑复杂业务流程的可控拆解与协作
-- **即插即用的能力层**：任何领域能力（RAG、记忆、代码执行、浏览器操作等）通过 MCP 工具标准化接入，引擎与能力彻底解耦
-- **全链路可观测**：OTel trace 贯穿父子 Run、跨 MCP 调用与 tool 执行，配合 Dev UI 实现从开发调试到生产监控的统一体验
+## 事件模型
 
-## 技术栈
+一次运行的事件顺序（真实顺序，不是示意图）：
 
-### 语言与 LLM
+```
+agent_start
+  └─ compress_start → compress_end            （需要压缩时）
+  └─ llm_start → content_chunk / reasoning_chunk → llm_end
+       └─ tool_run_start → tool_approval_requested → tool_approval_resolved → tool_run_end
+  └─ …（回到 llm_start，直到没有工具调用）
+  └─ session_budget_exceeded                   （预算耗尽）
+agent_end                                      （finish_reason + 聚合用量 + 时长）
+```
 
-| 类别 | 技术 |
-|------|------|
-| 语言 | Go |
-| LLM 接入 | OpenAI SDK（兜底）、火山引擎 Ark（volcengine-go-sdk）、DeepSeek（deepseek-go） |
+失败也是事件：`llm_error`（含是否可重试）、`session_run_error`、`session_persist_error`。没有静默失败。
 
-### loopForge（Multi-Agent 运行时）
+## 持久化语义
 
-| 类别 | 技术 |
-|------|------|
-| ChatModel 适配器 | OpenAI SDK（兜底）、volcengine-go-sdk（Lark/Ark）、deepseek-go（DeepSeek） |
-| MCP 客户端 | MCP Go SDK（`modelcontextprotocol/go-sdk`） |
-| Skills | `SKILL.md` 解析、注册表与 system 注入 |
-| 可观测性 | OpenTelemetry（trace / metrics） |
+- **恢复粒度 = 一个 Run**：每轮结束提交一次检查点（`Messages + Usage + revision`）。
+- **同一内容幂等**：内容不变时重放不会推高 `revision`；内容变化才递增。
+- **原子提交**：临时文件 → `fsync` → `rename` → `fsync(dir)`；文件权限 `0600`。
+- **校验和**：先对「不含 checksum 的 JSON」求 sha256，再写入；读取时校验，篡改/写坏直接报 `ErrChecksum`。
+- **冷启动**：会话不存在时返回空快照而不是错误。
+- **坏历史不启动**：恢复时校验 `tool_calls ↔ tool 回执` 配对，不合法直接失败——带着坏历史继续跑比启动失败更糟。
 
-### test-server（调试网关）
+## 测试
 
-| 类别 | 技术 |
-|------|------|
-| HTTP 与流式响应 | Hertz（CloudWeGo）、SSE |
+```bash
+go test ./...          # 全部单元测试
+go vet ./...           # 静态检查
+go test -race ./...    # 竞态检测（推荐在 CI 里跑）
+```
 
-## 设计文档
+| 包 | 覆盖重点 |
+|---|---|
+| `core` | 消息不变量、工具调用配对、成本折算、缓存计价 |
+| `events` | 事件名稳定性（公开契约）、信封传递 |
+| `provider` | SSE 文本/思考/工具调用拼装、429 与上下文超限分类、Retry-After、自定义头 |
+| `tools` | 并发确实并发、串行冲刷、panic 收敛、超时、头尾截断、重名注册 |
+| `tools/builtin` | 读写改、路径越界拒绝、glob/grep、bash 退出码与破坏性命令拒绝、环境隔离 |
+| `compress` | 触发条件（真实用量优先）、近窗保留、不切断工具调用对、摘要失败保留原上下文 |
+| `agents` | 工具→回答全链路、审批拒绝不执行、可重试恢复、不可重试终止、轮次/预算护栏、首字超时、事件顺序 |
+| `session` | 队列背压、持久化与恢复、审批 FIFO（仅队首）、超时即拒绝、关闭后拒绝新工作、持久化失败可见 |
 
-`doc/design/` 目录包含 loopForge 的完整设计文档体系，按序号排列：
+## 与 hai-harness 的关系
 
-| 文档 | 内容 |
-|------|------|
-| [00-abstractions.md](loopForge/doc/design/00-abstractions.md) | 核心抽象总览：Agent、Runner、Model、MCP、Spawn 等 |
-| [01-agent-core.md](loopForge/doc/design/01-agent-core.md) | Agent 核心契约：Runnable、RunLoop、生命周期 |
-| [02-runner-core.md](loopForge/doc/design/02-runner-core.md) | Runner 编排器：单 Agent 执行、Transfer Loop、Spawn |
-| [03-events.md](loopForge/doc/design/03-events.md) | 运行时事件体系：类型定义、发射契约 |
-| [04-tools.md](loopForge/doc/design/04-tools.md) | 工具系统：ToolInfo、ToolCallHandler、分派链 |
-| [05-mcp-tools.md](loopForge/doc/design/05-mcp-tools.md) | MCP 工具集成：Bootstrap、前缀隔离、白名单 |
-| [06-Variable.md](loopForge/doc/design/06-Variable.md) | 变量存储：VarStore、Snapshot/Materialize、LLM 写入 |
-| [07-transfer.md](loopForge/doc/design/07-transfer.md) | Agent 转移：Handoff 注册、transfer 工具生成 |
-| [08-skills.md](loopForge/doc/design/08-skills.md) | Skills 系统：SKILL.md 解析、注册表、注入 |
-| [09-system-prompt.md](loopForge/doc/design/09-system-prompt.md) | System Prompt 构建：Builder 管线、变量替换 |
-| [10-spawn.md](loopForge/doc/design/10-spawn.md) | 动态 Spawn：子 Agent 创建、深度/并发/预算控制 |
-| [11-chatmodel.md](loopForge/doc/design/11-chatmodel.md) | ChatModel 接口与适配器：Lark、DeepSeek、OpenAI SDK |
-| [12-budget.md](loopForge/doc/design/12-budget.md) | 预算控制：Token/Cost 额度、Tree-wide 累计 |
-| [13-errors.md](loopForge/doc/design/13-errors.md) | 错误体系：sentinel 错误、错误类型 |
+Rei 的运行时机制抽取自 [`hai-harness`](https://github.com/seven7628/hai-harness)（MIT）的内核，并做了三处有意收窄：
+
+| 维度 | hai-harness | Rei |
+|---|---|---|
+| 形态 | 完整 harness + 桌面端参考宿主 | 纯库，宿主自备 |
+| 事件 | 接口式 29 类型 / 48 struct | 20 类型 + 统一信封 |
+| 持久化 | `.jsonl` + `.lock` + `.record.json` + 块 sidecar | 单文件/单键快照（便于换成 DB） |
+| 依赖 | 20+（含三家模型 SDK） | **零第三方依赖**（仅标准库） |
+| 范围 | 含子 agent / MCP / hooks / cron / IM / 插件 | 只保留运行时内核 |
+
+事件名、语义与护栏策略尽量与 hai-harness 对齐，便于已有宿主迁移；但不追求 API 逐个同形。
+
+## 目录结构
+
+```
+.
+├── core/               消息 · 工具调用 · 用量 · 成本（零依赖）
+├── events/             事件契约（Type / Base / Handler / Approver）
+├── provider/           Provider 接口 + OpenAI 兼容流式实现 + 错误分类 + 退避
+├── tools/              工具协议 + 执行引擎
+│   └── builtin/        工区工具（读写改 / glob / grep / bash）
+├── compress/           触发判断 + 近窗压缩 + LLM 摘要压缩
+├── agents/             AgentLoop（ReAct / 重试 / 压缩 / 审批 / 预算）
+├── session/            会话容器 + 审批 FIFO + 持久化
+└── examples/quickstart 可运行示例
+```
+
+## 语言约定
+
+- **注释、包文档、README、面向宿主的错误信息：中文。**
+- **内置 prompt 一律英文**：基础系统提示、压缩摘要提示、压缩转写标签、工具 `Description` 与参数 schema 说明、工具结果里的状态文案（如 `User denied this tool call`、`... [truncated N bytes] ...`）。原因：这些字符串会原样进入模型上下文，英文在不同厂商的分词与指令微调分布上最稳定，也避免中英混排在前缀缓存上产生额外分片。
+- 这条约定由测试守护：`agents/prompt_test.go`、`compress/prompt_test.go`、`tools/builtin/prompt_test.go` 会扫描内置 prompt 中的非 ASCII 字符。
+
+## 设计取舍
+
+1. **事件是公开契约**：新增/修改事件类型等于 API 变更；改事件名字符串等于破坏宿主。
+2. **压缩失败保留原上下文**：绝不截断式降级——截断会静默丢信息，失败至少是可见的。
+3. **重试只在「还没吐字」时发生**：已经向宿主发过正文增量再重试，会造成重复输出。
+4. **审批串行且只认队首**：乱序决定会让人看到的顺序与实际放行顺序不一致，审计失效。
+5. **成本用整数 µUSD**：浮点累加在长会话里会产生可见误差。
+6. **bash 是护栏不是沙箱**：静态拒绝 + 环境白名单只能降低误操作概率；不可信代码请放进容器。
+
+## 路线图
+
+- [ ] 子 agent（同步只读 / 后台任务，带 `parent_run_id` 事件树）
+- [ ] MCP 客户端（stdio / http / sse）
+- [ ] Anthropic Messages 协议实现
+- [ ] 事件 → trace 投影（span 只取元数据，详情按 `call_id` 回查）
+- [ ] `Plan` 模式事件与工具
+
+## 许可证
+
+MIT。运行时机制抽取自 `hai-harness`（MIT，Copyright seven7628），保留其版权声明；本仓库实现为独立重写并做了收窄。
